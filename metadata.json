@@ -1,0 +1,8 @@
+{
+  "name": "OmniChat AI",
+  "description": "A multi-modal AI chatbot featuring text, voice, search grounding, Google Workspace integrations, and more.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

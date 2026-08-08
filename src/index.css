@@ -1,0 +1,222 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Outfit:wght@400;500;600;700&family=Caveat:wght@400;500;600&display=swap');
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-serif: "Playfair Display", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-handwriting: "Caveat", cursive;
+}
+
+@layer utilities {
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Glassmorphism utilities */
+.glass {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.glass-subtle {
+  background: rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(32px) saturate(200%);
+  -webkit-backdrop-filter: blur(32px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+/* Liquid glass input */
+.glass-input {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.glass-input:focus-within {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* Smooth animation helpers */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(24px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease forwards;
+}
+
+.fill-mode-forwards {
+  animation-fill-mode: forwards;
+}
+
+/* ===== Ultra Glass UI ===== */
+
+.glass-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 24px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.25),
+    inset 0 1px 1px rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(255,255,255,0.18),
+    rgba(255,255,255,0.04)
+  );
+  pointer-events: none;
+}
+
+.glass-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  border-color: rgba(255,255,255,0.3);
+  box-shadow:
+    0 12px 40px rgba(0,0,0,0.35),
+    inset 0 1px 2px rgba(255,255,255,0.3);
+}
+
+/* Glass Button */
+
+.glass-button {
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 16px;
+  color: white;
+  padding: 14px 20px;
+  cursor: pointer;
+  transition: all .25s ease;
+}
+
+.glass-button:hover {
+  background: rgba(255,255,255,0.2);
+  transform: scale(1.05);
+}
+
+.glass-button:active {
+  transform: scale(0.96);
+}
+
+/* =====================================
+   EXPERIMENTAL FRAME RATE BOOST (90 FPS)
+   ===================================== */
+/* Force GPU composite layers for ultra-smooth 90 FPS sliding and transitions */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.transform-gpu {
+  transform: translate3d(0, 0, 0);
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+body.perf-boost {
+  /* Prevent background image redraw delays */
+  background-attachment: scroll !important;
+}
+
+/* 1. Disable/Reduce Expensive Blur Filters (disableHeavyBlur) */
+body.perf-boost .glass,
+body.perf-boost .glass-subtle,
+body.perf-boost .glass-strong,
+body.perf-boost .glass-input,
+body.perf-boost .glass-card,
+body.perf-boost .glass-button,
+body.perf-boost .dash-card,
+body.perf-boost .backdrop-blur-3xl,
+body.perf-boost .backdrop-blur-md,
+body.perf-boost .backdrop-blur-sm,
+body.perf-boost .backdrop-blur {
+  backdrop-filter: blur(2px) saturate(130%) !important;
+  -webkit-backdrop-filter: blur(2px) saturate(130%) !important;
+}
+
+/* Disable expensive SVG/CSS blurs on weather particles to save paint overhead */
+body.perf-boost .weather-snowflake,
+body.perf-boost .weather-cloud-blob,
+body.perf-boost .weather-fog-blob,
+body.perf-boost [class*="blur-"] {
+  filter: none !important;
+  /* Retain standard opacity representation instead */
+}
+
+/* 2. Enable Hardware Acceleration (FLAG_HARDWARE_ACCELERATED) */
+body.perf-boost .weather-rain-drop,
+body.perf-boost .weather-drizzle-drop,
+body.perf-boost .weather-snowflake,
+body.perf-boost .weather-cloud-blob,
+body.perf-boost .weather-fog-blob,
+body.perf-boost .motion-div,
+body.perf-boost svg,
+body.perf-boost img,
+body.perf-boost .dash-card,
+body.perf-boost .animate-pulse {
+  transform: translate3d(0, 0, 0) !important;
+  will-change: transform, opacity !important;
+  backface-visibility: hidden !important;
+  -webkit-backface-visibility: hidden !important;
+  transform-style: preserve-3d !important;
+}
+
+/* 3. Smooth scrolling and optimized recyclerview equivalents */
+body.perf-boost * {
+  scroll-behavior: auto !important; /* Prevents scroll stuttering during rapid redraws */
+}
+
+
+
+
