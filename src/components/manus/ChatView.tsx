@@ -145,7 +145,7 @@ export function ChatView({
   };
 
   return (
-    <div className="flex flex-col h-full bg-stone-50 dark:bg-zinc-950 relative overflow-hidden">
+    <div className="flex-1 h-full min-h-0 flex flex-col bg-stone-50 dark:bg-zinc-950 relative overflow-hidden">
       {/* Task view header */}
       <div className="h-16 border-b border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-md px-8 flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-6">
@@ -186,7 +186,7 @@ export function ChatView({
       </div>
 
       {/* Main Results Scroll area */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-20 py-8 space-y-8 scroll-smooth pb-32">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-20 py-8 space-y-8 scroll-smooth pb-32">
         {/* Step progression displays */}
         {steps.length > 0 && (
           <div className="max-w-3xl mx-auto space-y-2">
@@ -240,11 +240,14 @@ export function ChatView({
             )}
           </div>
         )}
+
+        {/* Auto scroll anchor */}
+        <div ref={bottomRef} className="h-4" />
       </div>
 
       {/* Continuation Floating message area */}
-      <div className="absolute bottom-6 left-0 right-0 px-4 flex justify-center z-10">
-        <div className="w-full max-w-3xl bg-white dark:bg-zinc-900 rounded-[2rem] shadow-xl border border-gray-200 dark:border-gray-800 p-2 pl-4 flex items-center gap-2">
+      <div className="absolute bottom-6 left-0 right-0 px-4 flex justify-center z-10 pointer-events-none">
+        <div className="w-full max-w-3xl bg-white dark:bg-zinc-900 rounded-[2rem] shadow-xl border border-gray-200 dark:border-gray-800 p-2 pl-4 flex items-center gap-2 pointer-events-auto">
           <button className="p-2 hover:bg-gray-50 dark:hover:bg-zinc-800 rounded-full transition-colors text-gray-400">
             <Plus size={20} />
           </button>

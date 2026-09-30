@@ -52,7 +52,7 @@ export function WebsiteBuilderView({
   const showPreview = trustDelayPassed && (previewUrl || srcDoc) && status === 'completed';
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-stone-50 dark:bg-zinc-950 overflow-hidden">
+    <div className="flex-1 flex flex-col h-full min-h-0 bg-stone-50 dark:bg-zinc-950 overflow-hidden">
       {/* Header */}
       <div className="h-14 border-b border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
@@ -109,10 +109,10 @@ export function WebsiteBuilderView({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-hidden flex">
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col md:flex-row">
         {/* Sidebar - Timeline */}
-        <div className="w-80 border-r border-gray-200 dark:border-gray-800 bg-white/30 dark:bg-zinc-900/30 backdrop-blur overflow-y-auto">
-          <div className="p-6 space-y-8">
+        <div className="w-full md:w-80 max-h-56 md:max-h-none border-b md:border-b-0 md:border-r border-gray-200 dark:border-gray-800 bg-white/30 dark:bg-zinc-900/30 backdrop-blur overflow-y-auto shrink-0">
+          <div className="p-4 md:p-6 space-y-6 md:space-y-8">
             <div className="space-y-1">
               <h3 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Build Progress</h3>
               <p className="text-xs text-gray-500">Step-by-step website creation</p>
@@ -168,7 +168,7 @@ export function WebsiteBuilderView({
         </div>
 
         {/* Preview Area */}
-        <div className="flex-1 bg-stone-100 dark:bg-zinc-900 p-8 overflow-hidden">
+        <div className="flex-1 min-h-0 bg-stone-100 dark:bg-zinc-900 p-4 md:p-8 overflow-y-auto">
           <div className="h-full flex items-center justify-center">
             {!showPreview ? (
               <div className="text-center space-y-4">

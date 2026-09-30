@@ -155,8 +155,8 @@ export function Home({ onStartTask }: HomeProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 bg-stone-50 dark:bg-zinc-950 min-h-full">
-      <div className="w-full max-w-4xl space-y-12">
+    <div className="flex-1 w-full h-full min-h-0 overflow-y-auto p-4 sm:p-6 md:p-8 bg-stone-50 dark:bg-zinc-950 flex flex-col items-center scroll-smooth">
+      <div className="w-full max-w-4xl space-y-8 sm:space-y-12 my-auto py-8 pt-16 sm:pt-8">
         <div className="text-center space-y-4">
           <h1 className="text-6xl font-serif font-bold tracking-tight text-stone-900 dark:text-zinc-100">
             What can I do for you?

@@ -58,7 +58,7 @@ export const ManusMode: React.FC = () => {
     <div className="flex h-full w-full overflow-hidden bg-stone-50 dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 relative">
       
       {/* ── Main Workspace Content Area ── */}
-      <div className="flex-1 h-full overflow-hidden relative flex flex-col">
+      <div className="flex-1 h-full min-h-0 overflow-hidden relative flex flex-col">
         {/* Simple top bar with history control / plus control */}
         <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
           <select
