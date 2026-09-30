@@ -5,6 +5,7 @@ import { stopSpeech } from '../utils/speech';
 import { useSettings } from '../contexts/SettingsContext';
 import { ScreenStreamModal } from '../components/ScreenStreamModal';
 import { useAutoSaveDraft } from '../hooks/useAutoSaveDraft';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
 
 interface JarvisModeProps {
   wakeWordTriggered?: boolean;
@@ -175,8 +176,12 @@ export const JarvisMode: React.FC<JarvisModeProps> = ({ wakeWordTriggered }) => 
     }
   };
 
+  // Periodic and unload auto-save for Jarvis messages
+  usePeriodicAutoSave('omnichat_jarvis_messages', messages, {
+    intervalMs: 1500
+  });
+
   useEffect(() => {
-    localStorage.setItem('omnichat_jarvis_messages', JSON.stringify(messages));
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -371,9 +376,10 @@ export const JarvisMode: React.FC<JarvisModeProps> = ({ wakeWordTriggered }) => 
       setIsRecording(true);
       setStatus('LISTENING');
     } catch (error) {
-      console.error('Error accessing microphone:', error);
+      console.warn('Error accessing microphone:', error);
       setMicPermissionError(true);
       setStatus('ONLINE');
+      setIsRecording(false);
     }
   };
 

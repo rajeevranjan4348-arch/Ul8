@@ -3,6 +3,7 @@ import { Volume2, Play, Loader2, AlertCircle, Download, Plus, Trash2, MessageSqu
 import { generateSpeech } from '../services/gemini';
 import { useTheme } from '../contexts/ThemeContext';
 import { motion, AnimatePresence } from 'motion/react';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
 
 interface SpeechSession {
   id: string;
@@ -56,17 +57,14 @@ export const TextToSpeechMode: React.FC = () => {
     }
   }, [sessions, currentSessionId]);
 
-  useEffect(() => {
-    localStorage.setItem('omnichat_tts_sessions', JSON.stringify(sessions));
-  }, [sessions]);
+  // Periodic and unload auto-save for TTS sessions
+  usePeriodicAutoSave('omnichat_tts_sessions', sessions, {
+    intervalMs: 1500
+  });
 
-  useEffect(() => {
-    if (currentSessionId) {
-      localStorage.setItem('omnichat_tts_current', currentSessionId);
-    } else {
-      localStorage.removeItem('omnichat_tts_current');
-    }
-  }, [currentSessionId]);
+  usePeriodicAutoSave('omnichat_tts_current', currentSessionId, {
+    intervalMs: 1500
+  });
 
   useEffect(() => {
     if (sessions.length === 0) {

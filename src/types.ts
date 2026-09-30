@@ -3,6 +3,8 @@ export type AppMode =
   | 'history'
   | 'chat-pro'
   | 'chat-fast'
+  | 'liquid-chat'
+  | 'omni-chat'
   | 'voice-live'
   | 'search-maps'
   | 'transcription'
@@ -10,7 +12,6 @@ export type AppMode =
   | 'image-gen'
   | 'jarvis'
   | 'coder'
-  | 'omni-chat'
   | 'workspace'
   | 'settings'
   | 'logs';

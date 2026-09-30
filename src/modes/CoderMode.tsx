@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, Copy, Download, Terminal, HelpCircle, Code2, Palette, Search, Folder, File, Plus, Trash2, GitBranch, GitCommit, GitPullRequest, UploadCloud, DownloadCloud, Edit2, Play, FileText, MessageSquare, Image as ImageIcon, X, TestTube } from 'lucide-react';
+import { Send, Loader2, Copy, Download, Terminal, HelpCircle, Code2, Palette, Search, Folder, File, Plus, Trash2, GitBranch, GitCommit, GitPullRequest, UploadCloud, DownloadCloud, Edit2, Play, FileText, MessageSquare, Image as ImageIcon, X, TestTube, Mic, Sparkles, Volume2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAiInstance } from '../services/gemini';
 import Editor, { useMonaco } from '@monaco-editor/react';
@@ -7,6 +7,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import ReactMarkdown from 'react-markdown';
 import { Panel, Group, Separator } from 'react-resizable-panels';
 import { useAutoSaveDraft } from '../hooks/useAutoSaveDraft';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
+import { VoiceToCodeModal, InsertionTargetMode } from '../components/VoiceToCodeModal';
 
 interface FileNode {
   id: string;
@@ -133,6 +135,12 @@ export const CoderMode: React.FC = () => {
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Voice-to-Code Feature State
+  const [isVoiceToCodeOpen, setIsVoiceToCodeOpen] = useState(false);
+  const [selectedText, setSelectedText] = useState('');
+  const [cursorLine, setCursorLine] = useState<number | undefined>(undefined);
+  const editorRef = useRef<any>(null);
   
   const terminalInputRef = useRef<HTMLInputElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -244,13 +252,14 @@ export const CoderMode: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    localStorage.setItem('omnichat_coder_projects', JSON.stringify(projects));
-  }, [projects]);
+  // Periodic and unload auto-save for Coder projects and current project
+  usePeriodicAutoSave('omnichat_coder_projects', projects, {
+    intervalMs: 1500
+  });
 
-  useEffect(() => {
-    localStorage.setItem('omnichat_coder_current_project', currentProjectId);
-  }, [currentProjectId]);
+  usePeriodicAutoSave('omnichat_coder_current_project', currentProjectId, {
+    intervalMs: 1500
+  });
 
   useEffect(() => {
     setProjects(prev => prev.map(p => {
@@ -818,6 +827,130 @@ export const CoderMode: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      // Alt+V or Ctrl+Alt+V triggers Voice-to-Code Assistant
+      if ((e.altKey && (e.key === 'v' || e.key === 'V')) || (e.ctrlKey && e.altKey && (e.key === 'v' || e.key === 'V'))) {
+        e.preventDefault();
+        if (editorRef.current) {
+          const sel = editorRef.current.getSelection();
+          if (sel && !sel.isEmpty()) {
+            const model = editorRef.current.getModel();
+            if (model) {
+              setSelectedText(model.getValueInRange(sel));
+            }
+          }
+        }
+        setIsVoiceToCodeOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
+  }, []);
+
+  const handleVoiceCodeInsert = (insertedCode: string, targetMode: InsertionTargetMode, newFileName?: string) => {
+    if (targetMode === 'new-file') {
+      const extByLang: Record<string, string> = {
+        typescript: 'ts', javascript: 'js', python: 'py', html: 'html', css: 'css', json: 'json', sql: 'sql', go: 'go', rust: 'rs', java: 'java', cpp: 'cpp'
+      };
+      const fname = newFileName?.trim() || `voice_snippet_${Date.now()}.${extByLang[language] || 'js'}`;
+      const ext = fname.split('.').pop() || '';
+      const langMap: Record<string, string> = {
+        'js': 'javascript', 'ts': 'typescript', 'jsx': 'javascript', 'tsx': 'typescript',
+        'py': 'python', 'html': 'html', 'css': 'css', 'json': 'json', 'md': 'markdown',
+        'go': 'go', 'rs': 'rust', 'java': 'java', 'cpp': 'cpp', 'sql': 'sql', 'sh': 'shell'
+      };
+      const newId = Date.now().toString();
+      const newFile: FileNode = {
+        id: newId,
+        name: fname,
+        content: insertedCode,
+        language: langMap[ext] || language || 'javascript',
+        type: 'file',
+        parentId: null
+      };
+      setFiles(prev => [...prev, newFile]);
+      setCurrentFileId(newId);
+      return;
+    }
+
+    if (editorRef.current) {
+      const editor = editorRef.current;
+      const model = editor.getModel();
+      if (!model) {
+        setCode(insertedCode);
+        return;
+      }
+
+      if (targetMode === 'replace-file') {
+        const fullRange = model.getFullModelRange();
+        editor.executeEdits('voice-to-code', [{
+          range: fullRange,
+          text: insertedCode,
+          forceMoveMarkers: true
+        }]);
+        editor.focus();
+      } else if (targetMode === 'replace-selection') {
+        const selection = editor.getSelection();
+        if (selection && !selection.isEmpty()) {
+          editor.executeEdits('voice-to-code', [{
+            range: selection,
+            text: insertedCode,
+            forceMoveMarkers: true
+          }]);
+        } else {
+          const pos = editor.getPosition();
+          const range = pos 
+            ? { startLineNumber: pos.lineNumber, startColumn: pos.column, endLineNumber: pos.lineNumber, endColumn: pos.column }
+            : model.getFullModelRange();
+          editor.executeEdits('voice-to-code', [{
+            range: range,
+            text: insertedCode,
+            forceMoveMarkers: true
+          }]);
+        }
+        editor.focus();
+      } else if (targetMode === 'append') {
+        const lineCount = model.getLineCount();
+        const maxCol = model.getLineMaxColumn(lineCount);
+        editor.executeEdits('voice-to-code', [{
+          range: { startLineNumber: lineCount, startColumn: maxCol, endLineNumber: lineCount, endColumn: maxCol },
+          text: `\n\n${insertedCode}`,
+          forceMoveMarkers: true
+        }]);
+        editor.focus();
+      } else { // 'cursor'
+        const selection = editor.getSelection();
+        if (selection && !selection.isEmpty()) {
+          editor.executeEdits('voice-to-code', [{
+            range: selection,
+            text: insertedCode,
+            forceMoveMarkers: true
+          }]);
+        } else {
+          const pos = editor.getPosition();
+          const lineCount = model.getLineCount();
+          const maxCol = model.getLineMaxColumn(lineCount);
+          const range = pos 
+            ? { startLineNumber: pos.lineNumber, startColumn: pos.column, endLineNumber: pos.lineNumber, endColumn: pos.column } 
+            : { startLineNumber: lineCount, startColumn: maxCol, endLineNumber: lineCount, endColumn: maxCol };
+          editor.executeEdits('voice-to-code', [{
+            range: range,
+            text: insertedCode,
+            forceMoveMarkers: true
+          }]);
+        }
+        editor.focus();
+      }
+    } else {
+      if (targetMode === 'replace-file') {
+        setCode(insertedCode);
+      } else {
+        setCode(code ? `${code}\n\n${insertedCode}` : insertedCode);
+      }
+    }
+  };
+
   const handleCopy = () => navigator.clipboard.writeText(code);
 
   const handleDownloadTxt = () => {
@@ -1190,6 +1323,25 @@ export const CoderMode: React.FC = () => {
                   <div className="absolute right-2 bottom-2 flex items-center gap-1">
                     <button
                       type="button"
+                      onClick={() => {
+                        if (editorRef.current) {
+                          const sel = editorRef.current.getSelection();
+                          if (sel && !sel.isEmpty()) {
+                            setSelectedText(editorRef.current.getModel()?.getValueInRange(sel) || '');
+                          }
+                        }
+                        setIsVoiceToCodeOpen(true);
+                      }}
+                      title="Voice-to-Code (Alt+V)"
+                      className={`p-2 rounded-lg ${getAccentClass()} ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-slate-200'} transition-colors relative group`}
+                    >
+                      <Mic size={18} className="text-cyan-400" />
+                      <span className="absolute -top-7 right-0 scale-0 group-hover:scale-100 transition-transform bg-slate-900 text-white text-[10px] font-semibold px-2 py-0.5 rounded shadow whitespace-nowrap pointer-events-none">
+                        Voice-to-Code (Alt+V)
+                      </span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleGenerateImage}
                       disabled={isGeneratingImage}
                       title="Generate Image (Placeholder)"
@@ -1222,9 +1374,32 @@ export const CoderMode: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Code2 size={18} className={getAccentClass()} />
                 <span className="text-sm font-semibold tracking-wide uppercase opacity-80">Workspace</span>
+                <span className="text-xs opacity-40 font-mono">({currentFile?.name})</span>
               </div>
               
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
+                {/* Voice-to-Code Action Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (editorRef.current) {
+                      const sel = editorRef.current.getSelection();
+                      if (sel && !sel.isEmpty()) {
+                        setSelectedText(editorRef.current.getModel()?.getValueInRange(sel) || '');
+                      }
+                    }
+                    setIsVoiceToCodeOpen(true);
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm bg-gradient-to-r from-cyan-500/20 to-indigo-500/20 hover:from-cyan-500/30 hover:to-indigo-500/30 border border-cyan-500/40 text-cyan-400 hover:text-cyan-300 mr-1`}
+                  title="Voice-to-Code: Dictate coding tasks and suggest code directly into editor (Alt+V)"
+                >
+                  <Mic size={14} className="animate-pulse text-cyan-400" />
+                  <span className="font-bold">Voice to Code</span>
+                  <span className="hidden sm:inline-block text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/30 font-mono text-cyan-200">
+                    Alt+V
+                  </span>
+                </button>
+
                 <button onClick={handleExplain} className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'text-white/60 hover:text-white hover:bg-white/10' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'}`} title="Explain Code">
                   <HelpCircle size={16} />
                 </button>
@@ -1254,6 +1429,23 @@ export const CoderMode: React.FC = () => {
                       theme={editorTheme}
                       value={code}
                       onChange={(val) => setCode(val || '')}
+                      onMount={(editor) => {
+                        editorRef.current = editor;
+                        editor.onDidChangeCursorSelection(() => {
+                          const selection = editor.getSelection();
+                          if (selection && !selection.isEmpty()) {
+                            const model = editor.getModel();
+                            if (model) {
+                              setSelectedText(model.getValueInRange(selection));
+                            }
+                          } else {
+                            setSelectedText('');
+                          }
+                        });
+                        editor.onDidChangeCursorPosition((e) => {
+                          setCursorLine(e.position.lineNumber);
+                        });
+                      }}
                       options={{
                         minimap: { enabled: false },
                         fontSize: 14,
@@ -1499,6 +1691,17 @@ export const CoderMode: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Voice-to-Code Modal */}
+      <VoiceToCodeModal
+        isOpen={isVoiceToCodeOpen}
+        onClose={() => setIsVoiceToCodeOpen(false)}
+        activeFileName={currentFile?.name || 'index.js'}
+        activeLanguage={language}
+        currentCode={code}
+        selectedCode={selectedText}
+        cursorLine={cursorLine}
+        onInsertCode={handleVoiceCodeInsert}
+      />
     </div>
   );
 };

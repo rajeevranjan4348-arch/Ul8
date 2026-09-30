@@ -28,6 +28,7 @@ import { MicrophoneErrorModal } from './components/MicrophoneErrorModal';
 import { auth, saveVoiceCommandToCloud } from './lib/firebase';
 import { useGlobalPerfObserver } from './hooks/useGlobalPerfObserver';
 import { useGlobalAiErrorListener } from './hooks/useGlobalAiErrorListener';
+import { usePeriodicAutoSave } from './hooks/usePeriodicAutoSave';
 
 const MODE_LABELS: Record<string, string> = {
   dashboard: 'Dashboard',
@@ -48,10 +49,42 @@ const MODE_LABELS: Record<string, string> = {
   logs: 'Logs',
 };
 
+const VALID_MODES: AppMode[] = [
+  'dashboard',
+  'history',
+  'jarvis',
+  'chat-pro',
+  'chat-fast',
+  'liquid-chat',
+  'omni-chat',
+  'voice-live',
+  'search-maps',
+  'transcription',
+  'tts',
+  'image-gen',
+  'coder',
+  'workspace',
+  'settings',
+  'logs'
+];
+
 export default function App() {
   const { metrics, targetFps, setTargetFps } = useGlobalPerfObserver(90);
   const { activeError, dismissError } = useGlobalAiErrorListener();
-  const [currentMode, setCurrentMode] = useState<AppMode | 'liquid-chat'>('dashboard');
+  const [currentMode, setCurrentMode] = useState<AppMode>(() => {
+    try {
+      const saved = localStorage.getItem('omnichat_active_mode');
+      if (saved && VALID_MODES.includes(saved as AppMode)) {
+        return saved as AppMode;
+      }
+    } catch (e) {}
+    return 'dashboard';
+  });
+
+  usePeriodicAutoSave('omnichat_active_mode', currentMode, {
+    intervalMs: 1500
+  });
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [wakeWordTriggered, setWakeWordTriggered] = useState(false);
   const [voiceSearchTrigger, setVoiceSearchTrigger] = useState<number>(0);
@@ -64,7 +97,7 @@ export default function App() {
     'hey omni', 'omni ai', 'omni', 'hey jarvis', 'jarvis', 'hey assistant', 'computer'
   ], []);
 
-  const { isListeningForWakeWord, wakeWordTriggerBanner, startListening } = useWakeWord((transcript) => {
+  const { isListeningForWakeWord, wakeWordTriggerBanner, toggleListening } = useWakeWord((transcript) => {
     setCurrentMode('jarvis');
     setWakeWordTriggered(true);
     setTimeout(() => setWakeWordTriggered(false), 1200);
@@ -175,11 +208,11 @@ export default function App() {
       case 'logs':
         return <LogsMode />;
       default:
-        return <div>Select a mode</div>;
+        return <DashboardMode onModeChange={handleModeChange} />;
     }
   };
 
-  const handleModeChange = (mode: AppMode | 'liquid-chat') => {
+  const handleModeChange = (mode: AppMode) => {
     setCurrentMode(mode);
     setIsSidebarOpen(false);
   };
@@ -205,7 +238,6 @@ export default function App() {
         <Sidebar 
           currentMode={currentMode} 
           onModeChange={handleModeChange} 
-          onVoiceSearchTrigger={handleVoiceSearchTrigger}
         />
       </div>
 
@@ -240,7 +272,7 @@ export default function App() {
         {/* Listening / Hands-Free Wake Word Pill Badge */}
         <div className="hidden sm:flex absolute top-3 right-4 z-40 items-center gap-2">
           <button
-            onClick={() => startListening()}
+            onClick={() => toggleListening()}
             className={`px-3 py-1.5 rounded-full border text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
               isListeningForWakeWord
                 ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300 shadow-sm shadow-cyan-500/20 hover:bg-cyan-500/25'

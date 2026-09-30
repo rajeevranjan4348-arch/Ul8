@@ -5,6 +5,7 @@ import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import { useSettings } from '../contexts/SettingsContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { motion, AnimatePresence } from 'motion/react';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
 
 interface TranscriptionSession {
   id: string;
@@ -51,17 +52,14 @@ export const AudioTranscriptionMode: React.FC = () => {
     }
   }, [sessions, currentSessionId]);
 
-  useEffect(() => {
-    localStorage.setItem('omnichat_transcription_sessions', JSON.stringify(sessions));
-  }, [sessions]);
+  // Periodic and unload auto-save for transcription sessions
+  usePeriodicAutoSave('omnichat_transcription_sessions', sessions, {
+    intervalMs: 1500
+  });
 
-  useEffect(() => {
-    if (currentSessionId) {
-      localStorage.setItem('omnichat_transcription_current', currentSessionId);
-    } else {
-      localStorage.removeItem('omnichat_transcription_current');
-    }
-  }, [currentSessionId]);
+  usePeriodicAutoSave('omnichat_transcription_current', currentSessionId, {
+    intervalMs: 1500
+  });
 
   useEffect(() => {
     if (sessions.length === 0) {

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { getAiInstance } from '../services/gemini';
 import { useSettings } from '../contexts/SettingsContext';
 import { playTextToSpeech, stopCurrentReadAloud } from '../utils/readAloud';
+import { usePeriodicAutoSave } from './usePeriodicAutoSave';
 
 export interface Step {
   id: string;
@@ -89,7 +90,7 @@ export function useManusAgent() {
     return initialSession?.messages || [];
   });
 
-  // Sync state to current session in sessions array and localStorage
+  // Sync state to current session in sessions array
   useEffect(() => {
     if (!currentSessionId) return;
 
@@ -116,10 +117,18 @@ export function useManusAgent() {
       } else {
         nextSessions.unshift(updatedSession);
       }
-      localStorage.setItem('omnichat_manus_sessions', JSON.stringify(nextSessions));
       return nextSessions;
     });
   }, [currentSessionId, prompt, taskType, websiteName, steps, taskStatus, result, chartData, previewUrl, srcDoc, messages]);
+
+  // Periodic and unload auto-save for Manus Agent sessions & active session
+  usePeriodicAutoSave('omnichat_manus_sessions', sessions, {
+    intervalMs: 1500
+  });
+
+  usePeriodicAutoSave('omnichat_manus_current_session_id', currentSessionId, {
+    intervalMs: 1500
+  });
 
   const loadSession = useCallback((id: string) => {
     const session = sessions.find(s => s.id === id);

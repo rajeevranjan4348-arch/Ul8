@@ -6,6 +6,7 @@ import {
 import { getAiInstance } from '../services/gemini';
 import { useTheme } from '../contexts/ThemeContext';
 import { motion, AnimatePresence } from 'motion/react';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
 
 interface GeneratedImageItem {
   id: string;
@@ -88,19 +89,14 @@ export const ImageGenerationMode: React.FC = () => {
     }
   }, [sessions, currentSessionId]);
 
-  // Save sessions to localStorage
-  useEffect(() => {
-    localStorage.setItem('omnichat_image_sessions', JSON.stringify(sessions));
-  }, [sessions]);
+  // Periodic and unload auto-save for image sessions & current session
+  usePeriodicAutoSave('omnichat_image_sessions', sessions, {
+    intervalMs: 1500
+  });
 
-  // Save current active session ID
-  useEffect(() => {
-    if (currentSessionId) {
-      localStorage.setItem('omnichat_image_current', currentSessionId);
-    } else {
-      localStorage.removeItem('omnichat_image_current');
-    }
-  }, [currentSessionId]);
+  usePeriodicAutoSave('omnichat_image_current', currentSessionId, {
+    intervalMs: 1500
+  });
 
   const activeSession = sessions.find(s => s.id === currentSessionId) || null;
 

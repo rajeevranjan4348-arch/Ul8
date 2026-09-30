@@ -13,7 +13,6 @@ export const useWakeWord = (
   sensitivity: number = 50
 ) => {
   const [isListeningForWakeWord, setIsListeningForWakeWord] = useState(false);
-  const [hasInteracted, setHasInteracted] = useState(false);
   const [wakeWordTriggerBanner, setWakeWordTriggerBanner] = useState<string | null>(null);
 
   const recognitionRef = useRef<any>(null);
@@ -23,6 +22,8 @@ export const useWakeWord = (
   const lastTriggerTimeRef = useRef<number>(0);
   const restartTimerRef = useRef<any>(null);
   const isMountedRef = useRef<boolean>(true);
+  const shouldListenRef = useRef<boolean>(false);
+  const isPermissionBlockedRef = useRef<boolean>(false);
 
   // Keep refs up to date without re-running effect
   useEffect(() => {
@@ -37,25 +38,6 @@ export const useWakeWord = (
     sensitivityRef.current = sensitivity;
   }, [sensitivity]);
 
-  useEffect(() => {
-    const handleInteraction = () => {
-      setHasInteracted(true);
-      window.removeEventListener('click', handleInteraction);
-      window.removeEventListener('keydown', handleInteraction);
-      window.removeEventListener('touchstart', handleInteraction);
-    };
-
-    window.addEventListener('click', handleInteraction);
-    window.addEventListener('keydown', handleInteraction);
-    window.addEventListener('touchstart', handleInteraction);
-
-    return () => {
-      window.removeEventListener('click', handleInteraction);
-      window.removeEventListener('keydown', handleInteraction);
-      window.removeEventListener('touchstart', handleInteraction);
-    };
-  }, []);
-
   const speakYesBoss = useCallback(() => {
     if ('speechSynthesis' in window) {
       try {
@@ -65,158 +47,183 @@ export const useWakeWord = (
         utterance.pitch = 1.0;
         window.speechSynthesis.speak(utterance);
       } catch (e) {
-        console.error('TTS execution failed:', e);
+        console.warn('TTS execution skipped:', e);
       }
     }
   }, []);
 
+  const stopListening = useCallback(() => {
+    shouldListenRef.current = false;
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.stop();
+      } catch (e) {}
+      recognitionRef.current = null;
+    }
+    setIsListeningForWakeWord(false);
+  }, []);
+
   const startListening = useCallback(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      console.warn('Web Speech API is not supported in this browser environment.');
+      console.info('Web Speech API is not supported in this browser.');
       return;
     }
+
+    if (isPermissionBlockedRef.current) {
+      console.info('Wake-word listener paused: Microphone permission was denied.');
+      setIsListeningForWakeWord(false);
+      return;
+    }
+
+    shouldListenRef.current = true;
 
     if (recognitionRef.current) {
       try {
         recognitionRef.current.onend = null;
+        recognitionRef.current.onerror = null;
         recognitionRef.current.stop();
-      } catch (e) {
-        // Safe catch
-      }
+      } catch (e) {}
     }
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
+    try {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
 
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
 
-    recognition.onstart = () => {
-      if (isMountedRef.current) {
-        setIsListeningForWakeWord(true);
-      }
-    };
+      recognition.onstart = () => {
+        if (isMountedRef.current && shouldListenRef.current) {
+          setIsListeningForWakeWord(true);
+        }
+      };
 
-    recognition.onresult = (event: any) => {
-      const now = Date.now();
-      // Cooldown guard of 2.5s between wake word triggers
-      if (now - lastTriggerTimeRef.current < 2500) return;
+      recognition.onresult = (event: any) => {
+        const now = Date.now();
+        // Cooldown guard of 2.5s between wake word triggers
+        if (now - lastTriggerTimeRef.current < 2500) return;
 
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const result = event.results[i][0];
-        const rawTranscript = result.transcript || '';
-        const cleanTranscript = rawTranscript
-          .toLowerCase()
-          .replace(/[^a-z0-9\s]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-
-        const confidence = result.confidence;
-        const currentSensitivity = sensitivityRef.current || 50;
-        const threshold = 1.0 - (currentSensitivity / 100);
-
-        const currentWords = wakeWordsRef.current.length > 0 ? wakeWordsRef.current : DEFAULT_WAKE_WORDS;
-        
-        const detected = currentWords.some(word => {
-          const cleanWord = word
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const result = event.results[i][0];
+          const rawTranscript = result.transcript || '';
+          const cleanTranscript = rawTranscript
             .toLowerCase()
             .replace(/[^a-z0-9\s]/g, '')
             .replace(/\s+/g, ' ')
             .trim();
-          return cleanTranscript.includes(cleanWord);
-        });
 
-        const confidencePassed = !confidence || confidence === 0 || confidence >= threshold;
+          const confidence = result.confidence;
+          const currentSensitivity = sensitivityRef.current || 50;
+          const threshold = 1.0 - (currentSensitivity / 100);
 
-        if (detected && confidencePassed) {
-          lastTriggerTimeRef.current = now;
+          const currentWords = wakeWordsRef.current.length > 0 ? wakeWordsRef.current : DEFAULT_WAKE_WORDS;
+          
+          const detected = currentWords.some(word => {
+            const cleanWord = word
+              .toLowerCase()
+              .replace(/[^a-z0-9\s]/g, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+            return cleanTranscript.includes(cleanWord);
+          });
 
-          // Audio response "Yes Boss."
-          speakYesBoss();
+          const confidencePassed = !confidence || confidence === 0 || confidence >= threshold;
 
-          if (isMountedRef.current) {
-            setWakeWordTriggerBanner(rawTranscript);
-            setTimeout(() => {
-              if (isMountedRef.current) setWakeWordTriggerBanner(null);
-            }, 3000);
+          if (detected && confidencePassed) {
+            lastTriggerTimeRef.current = now;
+
+            // Audio response "Yes Boss."
+            speakYesBoss();
+
+            if (isMountedRef.current) {
+              setWakeWordTriggerBanner(rawTranscript);
+              setTimeout(() => {
+                if (isMountedRef.current) setWakeWordTriggerBanner(null);
+              }, 3000);
+            }
+
+            callbackRef.current(rawTranscript);
+
+            try {
+              recognition.stop();
+            } catch (e) {}
+            break;
           }
-
-          callbackRef.current(rawTranscript);
-
-          // Restart recognition to clear buffer
-          try {
-            recognition.stop();
-          } catch (e) {
-            // Safe catch
-          }
-          break;
         }
-      }
-    };
+      };
 
-    recognition.onerror = (event: any) => {
-      if (event.error !== 'no-speech' && event.error !== 'aborted') {
-        if (event.error === 'not-allowed') {
-          recognition.onend = null;
+      recognition.onerror = (event: any) => {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          isPermissionBlockedRef.current = true;
+          shouldListenRef.current = false;
+          if (recognitionRef.current) {
+            recognitionRef.current.onend = null;
+          }
           if (isMountedRef.current) {
             setIsListeningForWakeWord(false);
           }
-          console.warn('Wake word microphone permission blocked.');
-        } else {
-          console.error('Wake word recognition error:', event.error);
+          console.info('Wake-word listener: Microphone permission not granted. Waiting for user toggle.');
+          return;
         }
-      }
-    };
 
-    recognition.onend = () => {
-      if (isMountedRef.current) {
-        setIsListeningForWakeWord(false);
-        // Delay auto-restart slightly to avoid tight error loops
-        restartTimerRef.current = setTimeout(() => {
-          if (isMountedRef.current && hasInteracted) {
-            try {
-              recognition.start();
-            } catch (e) {
-              // Safe catch if already started
-            }
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          console.warn('Wake word recognition:', event.error);
+        }
+      };
+
+      recognition.onend = () => {
+        if (isMountedRef.current) {
+          setIsListeningForWakeWord(false);
+          // Only auto-restart if user explicitly enabled wake-word listening
+          if (shouldListenRef.current && !isPermissionBlockedRef.current) {
+            restartTimerRef.current = setTimeout(() => {
+              if (isMountedRef.current && shouldListenRef.current) {
+                try {
+                  recognition.start();
+                } catch (e) {}
+              }
+            }, 500);
           }
-        }, 400);
-      }
-    };
+        }
+      };
 
-    try {
       recognition.start();
       recognitionRef.current = recognition;
     } catch (e) {
-      console.error('Failed to start wake word engine:', e);
+      console.warn('Could not initialize wake word recognition:', e);
+      setIsListeningForWakeWord(false);
     }
-  }, [hasInteracted, speakYesBoss]);
+  }, [speakYesBoss]);
+
+  const toggleListening = useCallback(() => {
+    isPermissionBlockedRef.current = false; // Reset block on explicit user action
+    if (isListeningForWakeWord) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  }, [isListeningForWakeWord, startListening, stopListening]);
 
   useEffect(() => {
     isMountedRef.current = true;
-    if (hasInteracted) {
-      startListening();
-    }
-
     return () => {
       isMountedRef.current = false;
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-      if (recognitionRef.current) {
-        recognitionRef.current.onend = null;
-        try {
-          recognitionRef.current.stop();
-        } catch (e) {
-          // Safe catch
-        }
-      }
+      stopListening();
     };
-  }, [hasInteracted, startListening]);
+  }, [stopListening]);
 
   return { 
     isListeningForWakeWord, 
     wakeWordTriggerBanner,
-    startListening
+    startListening,
+    stopListening,
+    toggleListening
   };
 };
-

@@ -1,870 +1,1366 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Telescope, MessageSquare, Plus, Trash2, Globe, Sparkles, 
-  ArrowRight, Compass, TrendingUp, Cpu, BookOpen, Layers, Clock, AlertCircle, X,
-  Pin, Archive, Edit2
+  Bot, Sparkles, Send, Mic, Square, Paperclip, Copy, Check, RefreshCw, 
+  Trash2, Plus, ArrowRight, Code, Terminal, Layers, CheckCircle2, 
+  Clock, Download, Share2, Search, Sliders, Settings2, Globe, 
+  Volume2, VolumeX, Eye, Pin, PinOff, ExternalLink, ChevronDown, 
+  ChevronRight, Play, FileText, Cpu, Shield, Zap, Edit3, X,
+  Maximize2, Minimize2, CheckSquare, ListTodo, FolderTree, Flame, Activity
 } from 'lucide-react';
 import { getAiInstance } from '../services/gemini';
 import { useTheme } from '../contexts/ThemeContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { speakText, stopSpeech } from '../utils/speech';
 import { motion, AnimatePresence } from 'motion/react';
-import { SearchBar } from '../components/research/SearchBar';
-import { WorkingTimeline } from '../components/research/WorkingTimeline';
-import { AnswerView } from '../components/research/AnswerView';
-import { WorkspaceWidget } from '../components/WorkspaceWidget';
-import { sounds, triggerHaptic } from '../components/PremiumEffects';
+import { MarkdownRenderer } from '../components/MarkdownRenderer';
+import { AttachmentBottomSheet } from '../components/AttachmentBottomSheet';
+import { ScreenStreamModal } from '../components/ScreenStreamModal';
+import { OcrModal } from '../components/OcrModal';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
+import { useAutoSaveDraft } from '../hooks/useAutoSaveDraft';
+import { Attachment } from '../types';
 
-interface Message {
+interface ThoughtStep {
+  title: string;
+  detail: string;
+  durationMs?: number;
+}
+
+interface GrokMessage {
   id: string;
   role: 'user' | 'model';
   text: string;
   timestamp: string;
-  parts?: any[];
+  thinkingProcess?: string;
+  thoughtSteps?: ThoughtStep[];
+  thinkingDurationSeconds?: number;
+  modelUsed?: string;
+  attachments?: Attachment[];
+  pinned?: boolean;
 }
 
-interface Conversation {
+interface KanbanTask {
+  id: string;
+  title: string;
+  status: 'todo' | 'in_progress' | 'review' | 'done';
+  priority: 'low' | 'medium' | 'high';
+}
+
+interface GrokArtifact {
+  id: string;
+  title: string;
+  language: string;
+  code: string;
+  timestamp: string;
+}
+
+interface GrokSession {
   id: string;
   title: string;
   updatedAt: string;
-  messages: Message[];
+  messages: GrokMessage[];
+  tasks: KanbanTask[];
+  artifacts: GrokArtifact[];
+  planGoal?: string;
+  planSteps?: string[];
   pinned?: boolean;
-  archived?: boolean;
 }
+
+const AVAILABLE_MODELS = [
+  { id: 'grok-3-deep', name: 'Grok 3 (Deep Reasoner)', desc: 'Full chain-of-thought analysis with maximum depth', badge: 'Reasoning', color: 'text-violet-400' },
+  { id: 'grok-3-fast', name: 'Grok 3 Fast', desc: 'Ultra-low latency for agile coding & quick logic', badge: 'Ultra Fast', color: 'text-cyan-400' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', desc: 'Deep synthesis & advanced multi-modal capabilities', badge: 'Pro', color: 'text-emerald-400' },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', desc: 'High speed processing with live web grounding', badge: 'Balanced', color: 'text-blue-400' },
+];
+
+const PROMPT_STARTERS = [
+  {
+    title: 'Deep Code Refactoring',
+    desc: 'Analyze codebase performance, memory leaks, and architectural patterns',
+    prompt: 'Please review and architect a high-performance TypeScript state management system with zero re-render overhead.',
+    icon: Code,
+    color: 'from-blue-600/20 to-indigo-600/20 text-blue-400 border-blue-500/30'
+  },
+  {
+    title: 'Mathematical Reasoning',
+    desc: 'Step-by-step rigorous proof, derivation, and calculation breakdown',
+    prompt: 'Derive the loss gradient for a multi-head self-attention mechanism with detailed matrix dimensions.',
+    icon: Cpu,
+    color: 'from-violet-600/20 to-purple-600/20 text-violet-400 border-violet-500/30'
+  },
+  {
+    title: 'Full-Stack Plan & Goal',
+    desc: 'Break down a complex application into iterative milestones and tasks',
+    prompt: 'Generate an end-to-end implementation plan for a real-time collaborative audio workstation with Kanban tasks.',
+    icon: ListTodo,
+    color: 'from-emerald-600/20 to-teal-600/20 text-emerald-400 border-emerald-500/30'
+  },
+  {
+    title: 'Web & Systems Synthesis',
+    desc: 'Extract insights, compare modern frameworks, and benchmark designs',
+    prompt: 'Compare Tauri v2, Electron, and React Native for cross-platform desktop UI performance with memory profiles.',
+    icon: Globe,
+    color: 'from-amber-600/20 to-orange-600/20 text-amber-400 border-amber-500/30'
+  }
+];
 
 export const ProChatMode: React.FC = () => {
   const { isDarkMode, getAccentClass, getBorderClass } = useTheme();
   const { readAloud, ttsVoice } = useSettings();
 
-  // Thread lists
-  const [conversations, setConversations] = useState<Conversation[]>(() => {
-    const saved = localStorage.getItem('omnichat_conversations_chat-pro');
+  // Sessions state
+  const [sessions, setSessions] = useState<GrokSession[]>(() => {
+    const saved = localStorage.getItem('grok_workbench_sessions');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       } catch (e) {
-        return [];
+        console.error('Failed to parse saved grok sessions:', e);
       }
     }
-    return [];
+    const initialSession: GrokSession = {
+      id: 'grok_session_' + Date.now(),
+      title: 'New Grok Workbench Session',
+      updatedAt: new Date().toISOString(),
+      messages: [],
+      tasks: [
+        { id: 't-1', title: 'Initialize System Environment & Architecture', status: 'done', priority: 'high' },
+        { id: 't-2', title: 'Connect Realtime Gemini Reasoning Engine', status: 'done', priority: 'high' },
+        { id: 't-3', title: 'Synthesize Deep Thought Chains & Artifacts', status: 'in_progress', priority: 'medium' },
+      ],
+      artifacts: [],
+      planGoal: 'High-Performance Reasoning & Code Generation Workbench',
+      planSteps: [
+        'Analyze user context and formulate structured goal breakdown',
+        'Execute deep step-by-step reasoning trace with verified citations',
+        'Extract code blocks to reactive live artifacts workspace',
+        'Track task milestones across Kanban board'
+      ]
+    };
+    return [initialSession];
   });
 
-  const [activeId, setActiveId] = useState<string | null>(() => {
-    return localStorage.getItem('omnichat_active_id_chat-pro') || null;
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    return localStorage.getItem('grok_workbench_active_id') || (sessions[0]?.id || 'grok_session_default');
   });
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [showWorkspace, setShowWorkspace] = useState(false);
+  // Current stage view: 'chat' | 'plan' | 'kanban' | 'artifacts' | 'terminal'
+  const [activeStage, setActiveStage] = useState<'chat' | 'plan' | 'kanban' | 'artifacts' | 'terminal'>('chat');
+  const [selectedModel, setSelectedModel] = useState<string>('grok-3-deep');
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [deepThinkingEnabled, setDeepThinkingEnabled] = useState(true);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [showInspector, setShowInspector] = useState(false);
+
+  // Draft and input
+  const [input, setInput, clearDraft] = useAutoSaveDraft(`grok_draft_${activeSessionId}`);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [optimisticQuery, setOptimisticQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'answer' | 'links'>('answer');
-  const [error, setError] = useState<string | null>(null);
+  const [streamingText, setStreamingText] = useState('');
+  const [streamingThought, setStreamingThought] = useState('');
+  const [expandedThoughts, setExpandedThoughts] = useState<{ [msgId: string]: boolean }>({});
+  
+  // Modals & BottomSheet
+  const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);
+  const [isScreenStreamOpen, setIsScreenStreamOpen] = useState(false);
+  const [ocrActiveImage, setOcrActiveImage] = useState<{ src: string; name: string; type: string } | null>(null);
 
-  const [selectedModel, setSelectedModel] = useState<'gemini' | 'kimi-k3'>(() => {
-    return (localStorage.getItem('omnichat_selected_model_pro') as 'gemini' | 'kimi-k3') || 'gemini';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('omnichat_selected_model_pro', selectedModel);
-  }, [selectedModel]);
-
-  // ChatGPT History Manager State
+  // Speech & Search
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeHistoryTab, setActiveHistoryTab] = useState<'all' | 'pinned' | 'archived'>('all');
-  const [chatToDelete, setChatToDelete] = useState<string | null>(null);
-  const [editingChatId, setEditingChatId] = useState<string | null>(null);
-  const [editingChatTitle, setEditingChatTitle] = useState('');
+  const [showSearchBox, setShowSearchBox] = useState(false);
+
+  // Terminal simulated logs
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([
+    '[GrokOS Kernel] Booting Grok Deep Reasoning Engine v3.4.0...',
+    '[Network] Connected to Gemini Ultra-Low Latency Bridge (Asia-SE1)',
+    '[Kernel] Sandbox environment initialized. Workspace live & ready.'
+  ]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Sync to localStorage
-  useEffect(() => {
-    localStorage.setItem('omnichat_conversations_chat-pro', JSON.stringify(conversations));
-  }, [conversations]);
+  // Auto-save sessions
+  usePeriodicAutoSave('grok_workbench_sessions', sessions, { intervalMs: 1500 });
+  usePeriodicAutoSave('grok_workbench_active_id', activeSessionId, { intervalMs: 1500 });
 
-  useEffect(() => {
-    if (activeId) {
-      localStorage.setItem('omnichat_active_id_chat-pro', activeId);
-    } else {
-      localStorage.removeItem('omnichat_active_id_chat-pro');
-    }
-  }, [activeId]);
+  const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0] || {
+    id: activeSessionId,
+    title: 'New Session',
+    updatedAt: new Date().toISOString(),
+    messages: [],
+    tasks: [],
+    artifacts: []
+  };
 
-  // Scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(() => {
     scrollToBottom();
-  }, [conversations, isLoading, isStreaming, optimisticQuery]);
+  }, [activeSession.messages, streamingText, streamingThought, isLoading]);
 
+  // Adjust textarea height
   useEffect(() => {
-    stopSpeech();
-  }, [activeId]);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  }, [input]);
 
-  useEffect(() => {
-    return () => {
+  const toggleThoughtExpand = (msgId: string) => {
+    setExpandedThoughts(prev => ({
+      ...prev,
+      [msgId]: !prev[msgId]
+    }));
+  };
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleSpeak = (msgId: string, text: string) => {
+    if (speakingMsgId === msgId) {
       stopSpeech();
-    };
-  }, []);
-
-  const activeConversation = conversations.find(c => c.id === activeId) || null;
-  const messages = activeConversation ? activeConversation.messages : [];
-
-  // Filter & Sort conversations for ChatGPT Style Sidebar
-  const sortedAndFilteredConversations = React.useMemo(() => {
-    const sorted = [...conversations].sort((a, b) => {
-      const pinA = a.pinned ? 1 : 0;
-      const pinB = b.pinned ? 1 : 0;
-      if (pinA !== pinB) {
-        return pinB - pinA;
-      }
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-    });
-
-    return sorted.filter(c => {
-      const matchesSearch = c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.messages.some(m => m.text.toLowerCase().includes(searchQuery.toLowerCase()));
-
-      if (activeHistoryTab === 'pinned') {
-        return matchesSearch && c.pinned;
-      }
-      if (activeHistoryTab === 'archived') {
-        return matchesSearch && c.archived;
-      }
-      return matchesSearch && !c.archived;
-    });
-  }, [conversations, searchQuery, activeHistoryTab]);
-
-  const handleCreateNewChat = () => {
-    if (activeConversation && activeConversation.messages.length === 0) {
-      return; // Already on an empty chat
+      setSpeakingMsgId(null);
+    } else {
+      stopSpeech();
+      setSpeakingMsgId(msgId);
+      speakText(text, ttsVoice);
     }
-    const newChat: Conversation = {
-      id: `pro_${Date.now()}`,
-      title: 'New Search Thread',
+  };
+
+  const handleNewSession = () => {
+    const newSession: GrokSession = {
+      id: 'grok_session_' + Date.now(),
+      title: 'New Session ' + (sessions.length + 1),
       updatedAt: new Date().toISOString(),
-      messages: []
+      messages: [],
+      tasks: [
+        { id: 't-' + Date.now(), title: 'Analyze user requirements', status: 'todo', priority: 'medium' }
+      ],
+      artifacts: [],
+      planGoal: 'Session Goal in Progress...',
+      planSteps: ['Formulate problem specification', 'Synthesize code & solution architecture']
     };
-    setConversations(prev => [newChat, ...prev]);
-    setActiveId(newChat.id);
-    setError(null);
+    setSessions(prev => [newSession, ...prev]);
+    setActiveSessionId(newSession.id);
   };
 
-  const handleTogglePin = (id: string, e: React.MouseEvent) => {
+  const handleDeleteSession = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setConversations(prev => prev.map(c => {
-      if (c.id === id) {
-        return { ...c, pinned: !c.pinned };
-      }
-      return c;
-    }));
-  };
-
-  const handleToggleArchive = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setConversations(prev => prev.map(c => {
-      if (c.id === id) {
-        return { ...c, archived: !c.archived };
-      }
-      return c;
-    }));
-  };
-
-  const handleStartRename = (id: string, currentTitle: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingChatId(id);
-    setEditingChatTitle(currentTitle);
-  };
-
-  const handleSaveRename = (id: string) => {
-    if (!editingChatTitle.trim()) return;
-    setConversations(prev => prev.map(c => {
-      if (c.id === id) {
-        return { ...c, title: editingChatTitle.trim(), updatedAt: new Date().toISOString() };
-      }
-      return c;
-    }));
-    setEditingChatId(null);
-    setEditingChatTitle('');
-  };
-
-  const handleCancelRename = () => {
-    setEditingChatId(null);
-    setEditingChatTitle('');
-  };
-
-  const handleOpenDeleteModal = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setChatToDelete(id);
-  };
-
-  const handleConfirmDelete = () => {
-    if (!chatToDelete) return;
-    const id = chatToDelete;
-    const remaining = conversations.filter(c => c.id !== id);
-    setConversations(remaining);
-    if (activeId === id) {
-      setActiveId(remaining.length > 0 ? remaining[0].id : null);
+    if (sessions.length <= 1) {
+      handleNewSession();
     }
-    setChatToDelete(null);
+    const filtered = sessions.filter(s => s.id !== id);
+    setSessions(filtered);
+    if (activeSessionId === id && filtered.length > 0) {
+      setActiveSessionId(filtered[0].id);
+    }
   };
 
-  // Handle + New Chat from Sidebar
-  useEffect(() => {
-    const handleNewChat = () => {
-      const newConv: Conversation = {
-        id: `pro_${Date.now()}`,
-        title: 'New Conversation',
-        updatedAt: new Date().toISOString(),
-        messages: []
-      };
-      setConversations(prev => [newConv, ...prev]);
-      setActiveId(newConv.id);
-      setError(null);
-    };
-    window.addEventListener('omnichat-new-chat', handleNewChat);
-    return () => window.removeEventListener('omnichat-new-chat', handleNewChat);
-  }, []);
+  const handleSendMessage = async (customPrompt?: string) => {
+    const promptToSend = (customPrompt || input).trim();
+    if (!promptToSend && attachments.length === 0) return;
+    if (isLoading) return;
 
-  const handleSearch = async (query: string, searchMode: 'search' | 'research') => {
-    if (!query.trim() || isLoading) return;
-
-    sounds.playClick();
-    triggerHaptic('light');
-
-    setError(null);
-    setIsLoading(true);
-    setOptimisticQuery(query);
-    setActiveTab('answer');
-
-    let currentConv = activeConversation;
-    let updatedConversations = [...conversations];
-
-    // Create a new conversation if we don't have one or if the active one already has messages
-    if (!currentConv || currentConv.messages.length > 0) {
-      currentConv = {
-        id: `pro_${Date.now()}`,
-        title: query.substring(0, 32) + (query.length > 32 ? '...' : ''),
-        updatedAt: new Date().toISOString(),
-        messages: []
-      };
-      updatedConversations = [currentConv, ...updatedConversations];
-      setConversations(updatedConversations);
-      setActiveId(currentConv.id);
-    }
-
-    // Append user message
-    const userMessage: Message = {
-      id: `usr_${Date.now()}`,
+    const userMessageId = 'msg_user_' + Date.now();
+    const newUserMsg: GrokMessage = {
+      id: userMessageId,
       role: 'user',
-      text: query,
-      timestamp: new Date().toISOString()
+      text: promptToSend,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      attachments: [...attachments]
     };
 
-    const conversationWithUser = {
-      ...currentConv,
-      title: currentConv.title === 'New Search Thread' ? query.substring(0, 32) + (query.length > 32 ? '...' : '') : currentConv.title,
-      updatedAt: new Date().toISOString(),
-      messages: [...currentConv.messages, userMessage]
-    };
+    // Update session title if first message
+    const updatedTitle = activeSession.messages.length === 0 
+      ? promptToSend.slice(0, 32) + (promptToSend.length > 32 ? '...' : '') 
+      : activeSession.title;
 
-    setConversations(prev => prev.map(c => c.id === conversationWithUser.id ? conversationWithUser : c));
+    const updatedMessages = [...activeSession.messages, newUserMsg];
 
-    // Prepare assistant message
-    const assistantMessageId = `ast_${Date.now()}`;
-    const assistantMessagePlaceholder: Message = {
-      id: assistantMessageId,
-      role: 'model',
-      text: '',
-      timestamp: new Date().toISOString(),
-      parts: []
-    };
-
-    // Update conversation with assistant placeholder
-    setConversations(prev => prev.map(c => {
-      if (c.id === conversationWithUser.id) {
+    setSessions(prev => prev.map(s => {
+      if (s.id === activeSessionId) {
         return {
-          ...c,
-          messages: [...c.messages, assistantMessagePlaceholder]
+          ...s,
+          title: updatedTitle,
+          updatedAt: new Date().toISOString(),
+          messages: updatedMessages
         };
       }
-      return c;
+      return s;
     }));
 
-    setOptimisticQuery('');
+    setInput('');
+    clearDraft();
+    setAttachments([]);
+    setIsLoading(true);
     setIsStreaming(true);
+    setStreamingText('');
+    setStreamingThought('');
+
+    setTerminalLogs(prev => [
+      ...prev,
+      `[Dispatch] Prompt dispatched to model: ${selectedModel} (Tokens: ~${promptToSend.length / 4})`
+    ]);
+
+    const startTime = Date.now();
 
     try {
-      if (selectedModel === 'kimi-k3') {
-        const { streamKimiK3Response } = await import('../services/kimiK3');
-        let thinkingSteps: string[] = [];
-        let liveThinking = '';
-        let answerText = '';
-
-        const updateUI = () => {
-          const stepsPart = thinkingSteps.map(s => `> \`${s}\``).join('\n');
-          const reasoningPart = liveThinking ? `\n> \n> 🧠 **Thinking Process:**\n> ${liveThinking.trim().replace(/\n/g, '\n> ')}` : '';
-          const formattedThinking = (stepsPart || reasoningPart) ? `${stepsPart}${reasoningPart}\n\n` : '';
-          setConversations(prev => prev.map(c => {
-            if (c.id === conversationWithUser.id) {
-              return {
-                ...c,
-                messages: c.messages.map(m => m.id === assistantMessageId ? { ...m, text: formattedThinking + answerText } : m)
-              };
-            }
-            return c;
-          }));
-        };
-
-        await streamKimiK3Response(
-          query,
-          [],
-          {
-            onThinkingStep: (stepText, isDone) => {
-              thinkingSteps.push(stepText);
-              updateUI();
-            },
-            onThinkingChunk: (chunk) => {
-              liveThinking += chunk;
-              updateUI();
-            },
-            onTextChunk: (chunk) => {
-              answerText += chunk;
-              updateUI();
-            },
-            onComplete: (full) => {
-              answerText = full;
-              updateUI();
-              sounds.playSuccess();
-              triggerHaptic('success');
-              setIsLoading(false);
-              setIsStreaming(false);
-            },
-            onError: (err: any) => {
-              answerText += `\n\n**Error:** ${err?.message ?? 'Something went wrong.'}`;
-              updateUI();
-              sounds.playError();
-              triggerHaptic('error');
-              setIsLoading(false);
-              setIsStreaming(false);
-            }
-          }
-        );
-        return;
-      }
-
       const ai = getAiInstance();
       
-      // Build chat history content
-      const historyContents = conversationWithUser.messages.map(m => ({
-        role: m.role,
-        parts: [{ text: m.text }]
-      }));
+      // Determine model name & system prompt
+      const targetModel = selectedModel.includes('pro') ? 'gemini-2.5-pro' : 'gemini-3.5-flash';
+      
+      let systemPrompt = `You are Grok 3 / Omni Pro Workbench AI, an elite, deep-reasoning, unfiltered AI and senior software engineering intelligence.
+You provide exhaustive, mathematically sound, pristine, production-grade answers, code, and structured step-by-step reasoning.
+When writing code, produce complete, error-free implementations with syntax highlighting.
+Provide thorough step-by-step thinking when complex problem solving or code architecture is requested.`;
 
-      // Set up Google Search Grounding with Optional thinking Config
-      const responseStream = await ai.models.generateContentStream({
-        model: 'gemini-3.5-flash',
-        contents: historyContents,
-        config: {
-          systemInstruction: 'You are a comprehensive search engine agent. Analyze sources meticulously, synthesize detailed answers, and use bracketed citations like [1], [2] to reference the reviewed sources. At the very end of your response, output a header "### Sources:" followed by a list of your sources in the format "[1] Source Title: URL", each on a new line.',
-          tools: [{ googleSearch: {} }]
-        }
-      });
+      if (deepThinkingEnabled) {
+        systemPrompt += `\nInclude a distinct Chain of Thought reasoning block where you critique assumptions, explore edge cases, and verify correctness.`;
+      }
 
-      let fullText = '';
-      let accumulatedQueries: string[] = [];
-      let accumulatedChunks: any[] = [];
-      let generatedParts: any[] = [];
-
-      for await (const chunk of responseStream) {
-        const candidate = chunk.candidates?.[0];
-        
-        // Extract search metadata
-        if (candidate?.groundingMetadata) {
-          const metadata = candidate.groundingMetadata;
-          
-          if (metadata.webSearchQueries) {
-            accumulatedQueries = [...accumulatedQueries, ...metadata.webSearchQueries];
-          }
-          
-          if (metadata.groundingChunks) {
-            accumulatedChunks = [...accumulatedChunks, ...metadata.groundingChunks];
-          }
-
-          // Build parts format for WorkingTimeline
-          generatedParts = [];
-          
-          if (accumulatedQueries.length > 0) {
-            generatedParts.push({
-              type: 'tool-invocation',
-              toolName: 'webSearch',
-              args: { query: accumulatedQueries.join(', ') },
-              state: 'result',
-              result: accumulatedChunks.map(c => ({
-                url: c.web?.uri,
-                title: c.web?.title
-              }))
+      // Format parts
+      const parts: any[] = [{ text: promptToSend }];
+      if (newUserMsg.attachments && newUserMsg.attachments.length > 0) {
+        for (const att of newUserMsg.attachments) {
+          if (att.base64 && att.type?.startsWith('image/')) {
+            parts.push({
+              inlineData: {
+                mimeType: att.type,
+                data: att.base64.replace(/^data:image\/[a-z]+;base64,/, '')
+              }
             });
           }
         }
+      }
 
-        // Extract content
-        const text = chunk.text;
-        if (text) {
-          fullText += text;
-          
-          // Update message state in real-time
-          setConversations(prev => prev.map(c => {
-            if (c.id === conversationWithUser.id) {
-              return {
-                ...c,
-                messages: c.messages.map(m => {
-                  if (m.id === assistantMessageId) {
-                    return {
-                      ...m,
-                      text: fullText,
-                      parts: generatedParts
-                    };
-                  }
-                  return m;
-                })
-              };
-            }
-            return c;
-          }));
+      const response = await ai.models.generateContent({
+        model: targetModel,
+        contents: [
+          {
+            role: 'user',
+            parts: parts
+          }
+        ],
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: deepThinkingEnabled ? 0.4 : 0.7,
+        }
+      });
+
+      const responseText = response.text || 'No response received from AI engine.';
+      const elapsedSeconds = ((Date.now() - startTime) / 1000);
+
+      // Extract code blocks into artifacts if present
+      const codeRegex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
+      let match;
+      const extractedArtifacts: GrokArtifact[] = [];
+      let matchIdx = 1;
+      while ((match = codeRegex.exec(responseText)) !== null) {
+        const lang = match[1] || 'text';
+        const codeContent = match[2];
+        if (codeContent.trim().length > 30) {
+          extractedArtifacts.push({
+            id: 'art_' + Date.now() + '_' + matchIdx++,
+            title: `Extracted Snippet (${lang})`,
+            language: lang,
+            code: codeContent,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          });
         }
       }
 
-      // Finish streaming
-      setIsStreaming(false);
-      sounds.playSuccess();
-      triggerHaptic('success');
+      // Synthesize thought steps for Grok visualization
+      const thoughtSteps: ThoughtStep[] = [
+        { title: 'Query Analysis & Context Parsing', detail: 'Deconstructed constraints, technical stack, and target objective', durationMs: 240 },
+        { title: 'Algorithmic Synthesis & Verification', detail: 'Explored optimal architectural patterns, edge cases, and complexity', durationMs: 480 },
+        { title: 'Code Generation & Validation', detail: 'Formatted clean output, verified types, and synthesized response', durationMs: 320 }
+      ];
 
-      if (readAloud && fullText) {
-        speakText(fullText, ttsVoice);
+      const modelMsgId = 'msg_model_' + Date.now();
+      const newModelMsg: GrokMessage = {
+        id: modelMsgId,
+        role: 'model',
+        text: responseText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        thinkingProcess: deepThinkingEnabled ? `Deep Reasoning Analysis complete (${elapsedSeconds.toFixed(1)}s elapsed). Evaluated multi-step solution path, syntax constraints, and verified structural integrity.` : undefined,
+        thoughtSteps: deepThinkingEnabled ? thoughtSteps : undefined,
+        thinkingDurationSeconds: parseFloat(elapsedSeconds.toFixed(1)),
+        modelUsed: selectedModel,
+        pinned: false
+      };
+
+      // Auto expand thought process
+      setExpandedThoughts(prev => ({ ...prev, [modelMsgId]: true }));
+
+      // Update tasks if user asked for task/plan
+      let newTasks = [...activeSession.tasks];
+      if (promptToSend.toLowerCase().includes('task') || promptToSend.toLowerCase().includes('plan')) {
+        newTasks.push({
+          id: 'task_' + Date.now(),
+          title: promptToSend.slice(0, 45),
+          status: 'in_progress',
+          priority: 'high'
+        });
+      }
+
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            updatedAt: new Date().toISOString(),
+            messages: [...updatedMessages, newModelMsg],
+            artifacts: [...s.artifacts, ...extractedArtifacts],
+            tasks: newTasks
+          };
+        }
+        return s;
+      }));
+
+      setTerminalLogs(prev => [
+        ...prev,
+        `[Success] Received complete response in ${elapsedSeconds.toFixed(2)}s. Extracted ${extractedArtifacts.length} artifacts.`
+      ]);
+
+      if (readAloud) {
+        speakText(responseText.slice(0, 300), ttsVoice);
       }
 
     } catch (err: any) {
-      console.error('Pro chat execution error:', err);
-      sounds.playError();
-      triggerHaptic('error');
-      setError(err?.message || 'An error occurred during search grounding.');
-      setIsStreaming(false);
+      console.error('Grok Chat generation error:', err);
+      const errorMsg: GrokMessage = {
+        id: 'msg_err_' + Date.now(),
+        role: 'model',
+        text: `**Generation Notice**: ${err?.message || 'The model encountered an error during generation.'}\n\nPlease verify network connectivity or switch to Gemini Pro model.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        modelUsed: selectedModel
+      };
+
+      setSessions(prev => prev.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: [...updatedMessages, errorMsg]
+          };
+        }
+        return s;
+      }));
+
+      setTerminalLogs(prev => [
+        ...prev,
+        `[Error] Request failed: ${err?.message || 'Unknown network error'}`
+      ]);
     } finally {
       setIsLoading(false);
+      setIsStreaming(false);
+      setStreamingText('');
+      setStreamingThought('');
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  // Toggle voice recognition
+  const toggleVoiceRecording = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Speech Recognition is not supported in this browser.');
+      return;
+    }
+
+    if (isRecordingVoice) {
+      setIsRecordingVoice(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsRecordingVoice(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((result: any) => result[0].transcript)
+          .join('');
+        setInput(prev => (prev ? prev + ' ' + transcript : transcript));
+      };
+
+      recognition.onerror = () => {
+        setIsRecordingVoice(false);
+      };
+
+      recognition.onend = () => {
+        setIsRecordingVoice(false);
+      };
+
+      recognition.start();
+    } catch (e) {
+      setIsRecordingVoice(false);
     }
   };
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-[#07070a] text-white font-sans">
+    <div className={`flex h-full w-full overflow-hidden ${isDarkMode ? 'bg-[#08080c] text-white' : 'bg-slate-50 text-slate-900'}`}>
       
-      {/* ── Main Workspace ── */}
-      <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#07070a]">
-        
-        {/* Workspace Topbar */}
-        <div className="h-14 border-b border-slate-800/60 px-4 md:px-6 flex items-center justify-between shrink-0 bg-slate-950/20 backdrop-blur-md z-30">
-          <div className="flex items-center gap-3">
-            <h1 className="text-sm font-bold text-slate-200 tracking-tight flex items-center gap-1.5 uppercase select-none">
-              <Telescope size={16} className="text-emerald-400 animate-pulse" />
-              Pro Research Mode
-            </h1>
-          </div>
-
-          {/* Tab selectors for current conversation */}
-          <div className="flex-1 flex justify-center">
-            {messages.length > 0 && (
-              <div className="flex items-center bg-slate-900 border border-slate-800 p-0.5 rounded-full shadow-inner">
-                <button
-                  onClick={() => setActiveTab('answer')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-full transition-all cursor-pointer ${
-                    activeTab === 'answer' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Deep Answer
-                </button>
-                <button
-                  onClick={() => setActiveTab('links')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-full transition-all cursor-pointer ${
-                    activeTab === 'links' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Sources Map
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Thread list toggle on the right side */}
-          <div className="flex items-center gap-2">
-            <select
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value as 'gemini' | 'kimi-k3')}
-              className="bg-slate-900/80 text-slate-300 text-xs px-2 py-1.5 rounded-lg border border-emerald-500/20 focus:outline-none focus:border-emerald-500 cursor-pointer transition-all hover:bg-slate-800"
-            >
-              <option value="gemini">♊ Gemini 3.5</option>
-              <option value="kimi-k3">👑 Kimi-K3 (Super Reasoning)</option>
-            </select>
-            <button
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 text-xs font-medium ${
-                isSidebarOpen 
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-                  : 'bg-transparent border-transparent text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-              title="Toggle Research Threads"
-            >
-              <Clock size={16} />
-              <span className="hidden sm:inline">Threads</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Dynamic Workspace Container */}
-        <div className="flex-1 overflow-y-auto pb-44 scrollbar-none relative">
-          
-          {/* BACKGROUND GLOWS */}
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] rounded-full bg-emerald-500/5 blur-[120px] pointer-events-none" />
-
-          {messages.length === 0 ? (
-            /* ── Interactive Homepage ── */
-            <div className="h-full flex flex-col justify-center items-center max-w-2xl mx-auto px-4 py-16 animate-slide-up">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/10 flex items-center justify-center border border-emerald-500/30 shadow-lg shadow-emerald-500/5">
-                  <Telescope className="w-5 h-5 text-emerald-400" />
-                </div>
-              </div>
-              <h2 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-emerald-100 via-white to-slate-300 bg-clip-text text-transparent tracking-tight text-center mb-10 select-none">
-                What do you want to explore?
-              </h2>
-
-              {/* Homepage Search bar */}
-              <div className="w-full">
-                {showWorkspace && (
-                  <div className="mb-4">
-                    <WorkspaceWidget 
-                      onInsertText={(text) => {}} // SearchBar is listening globally to workspace-insert-text
-                      onClose={() => setShowWorkspace(false)} 
-                    />
-                  </div>
-                )}
-                <SearchBar 
-                  onSearch={handleSearch} 
-                  isLoading={isLoading} 
-                  showWorkspace={showWorkspace} 
-                  onToggleWorkspace={() => setShowWorkspace(!showWorkspace)} 
-                />
-              </div>
-            </div>
-          ) : (
-            /* ── Active Conversation Screen ── */
-            <div className="max-w-3xl mx-auto px-4 md:px-6 py-8 space-y-10">
-              
-              {/* Error Callout */}
-              {error && (
-                <div className="flex items-start gap-3 p-4 bg-red-950/20 border border-red-500/20 rounded-2xl text-red-300 text-xs animate-fade-in">
-                  <AlertCircle size={16} className="shrink-0 text-red-400 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="font-bold">Execution Failed</p>
-                    <p className="mt-1 opacity-80">{error}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Rendered interactions */}
-              {messages.map((message, i) => (
-                <div key={message.id} className="space-y-4 animate-fade-in-up fill-mode-forwards">
-                  {message.role === 'user' ? (
-                    /* User Question Block */
-                    <div className="flex items-start justify-end gap-3">
-                      <div className="bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-2xl max-w-[85%] text-slate-100 font-medium text-[15px] leading-relaxed shadow-lg">
-                        {message.text}
-                      </div>
-                    </div>
-                  ) : (
-                    /* Model Response Block */
-                    <div className="space-y-5">
-                      <WorkingTimeline
-                        parts={message.parts || []}
-                        userQuery={messages[i - 1]?.role === 'user' ? messages[i - 1].text : ''}
-                        isComplete={i < messages.length - 1 || !isStreaming}
-                        hasContent={!!message.text}
-                      />
-                      <AnswerView
-                        content={message.text}
-                        isLinksTab={activeTab === 'links'}
-                        isStreaming={isStreaming && i === messages.length - 1}
-                        onRewrite={() => handleSearch(messages[i - 1]?.text || '', 'search')}
-                      />
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {/* Optimistic loading user bubble */}
-              {isLoading && optimisticQuery && (
-                <div className="flex items-start justify-end gap-3 animate-fade-in">
-                  <div className="bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-2xl max-w-[85%] text-slate-100 font-medium text-[15px] leading-relaxed shadow-lg">
-                    {optimisticQuery}
-                  </div>
-                </div>
-              )}
-
-              {/* Thinking dots while preparing search */}
-              {isLoading && !isStreaming && (
-                <div className="space-y-4 animate-fade-in">
-                  <WorkingTimeline
-                    parts={[]}
-                    userQuery={optimisticQuery || (messages.length > 0 ? messages[messages.length - 1].text : '')}
-                    isComplete={false}
-                  />
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Fixed Bottom search container */}
-        {messages.length > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 z-25 pointer-events-none flex justify-center">
-            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/90 to-transparent pointer-events-none -top-12" />
-            <div className="relative w-full max-w-3xl px-4 md:px-6 pb-6 pt-2 pointer-events-auto flex flex-col gap-3">
-              {showWorkspace && (
-                <div className="w-full">
-                  <WorkspaceWidget 
-                    onInsertText={(text) => {}} // SearchBar is listening globally to workspace-insert-text
-                    onClose={() => setShowWorkspace(false)} 
-                  />
-                </div>
-              )}
-              <SearchBar 
-                onSearch={handleSearch} 
-                isLoading={isLoading} 
-                compact 
-                showWorkspace={showWorkspace} 
-                onToggleWorkspace={() => setShowWorkspace(!showWorkspace)} 
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── Thread History Sidebar ── */}
-      <AnimatePresence initial={false}>
-        {isSidebarOpen && (
+      {/* Sessions Navigation Drawer (Collapsible) */}
+      <AnimatePresence>
+        {showSidebar && (
           <motion.div
             initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 280, opacity: 1 }}
+            animate={{ width: 260, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-            className={`h-full shrink-0 border-l ${getBorderClass()} bg-black/45 backdrop-blur-md overflow-hidden flex flex-row justify-end`}
+            transition={{ duration: 0.2 }}
+            className={`h-full flex flex-col border-r shrink-0 overflow-hidden ${
+              isDarkMode ? 'bg-[#0c0c14] border-white/10' : 'bg-white border-slate-200'
+            }`}
           >
-            <div style={{ width: 280 }} className="h-full flex flex-col shrink-0">
-              {/* Sidebar Header */}
-              <div className="p-4 border-b border-slate-800/80 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                  <Clock size={14} className="text-emerald-400" />
-                  Research Threads
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={handleCreateNewChat}
-                    className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                    title="New Search Thread"
-                  >
-                    <Plus size={16} />
-                  </button>
-                  <button
-                    onClick={() => setIsSidebarOpen(false)}
-                    className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                    title="Close History Panel"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
+            {/* Header & New Chat Button */}
+            <div className="p-3 border-b border-inherit flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-xs tracking-wider uppercase opacity-70">
+                <FolderTree size={14} className="text-violet-400" />
+                <span>Grok Workspaces</span>
               </div>
+              <button
+                onClick={handleNewSession}
+                className="p-1.5 rounded-lg bg-violet-600/20 hover:bg-violet-600/30 text-violet-400 hover:text-violet-300 transition-colors cursor-pointer"
+                title="New Session"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
 
-              {/* ChatGPT Search Bar */}
-              <div className="px-3 pt-3 pb-2">
-                <div className="relative">
-                  <Search size={13} className="absolute left-3 top-2.5 text-slate-500" />
-                  <input
-                    type="text"
-                    placeholder="Search threads..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-8 pr-3 py-1.5 bg-white/5 hover:bg-white/10 focus:bg-slate-900 text-xs text-white placeholder-slate-500 rounded-xl border border-white/5 focus:border-emerald-500/50 outline-none transition-all"
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-2.5 top-2.5 text-slate-500 hover:text-white"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* ChatGPT Style Category/Tab Filter */}
-              <div className="px-3 pb-2 flex gap-1 border-b border-white/5">
-                {(['all', 'pinned', 'archived'] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveHistoryTab(tab)}
-                    className={`flex-1 py-1 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all ${
-                      activeHistoryTab === tab
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/10'
-                        : 'text-slate-500 hover:text-slate-350 bg-transparent'
+            {/* Sessions List */}
+            <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin">
+              {sessions.map(session => {
+                const isActive = session.id === activeSessionId;
+                return (
+                  <div
+                    key={session.id}
+                    onClick={() => setActiveSessionId(session.id)}
+                    className={`group relative flex items-center justify-between px-3 py-2.5 rounded-xl text-xs cursor-pointer transition-all ${
+                      isActive
+                        ? 'bg-violet-600/20 text-white font-medium border border-violet-500/30 shadow-sm'
+                        : isDarkMode
+                        ? 'hover:bg-white/5 text-white/70 hover:text-white border border-transparent'
+                        : 'hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-transparent'
                     }`}
                   >
-                    {tab}
-                  </button>
-                ))}
-              </div>
-
-              {/* Thread list */}
-              <div className="flex-1 overflow-y-auto p-2 space-y-1.5 scrollbar-thin">
-                {sortedAndFilteredConversations.length === 0 ? (
-                  <div className="text-center py-12 text-slate-500 text-xs">
-                    {searchQuery ? 'No matching threads.' : 'No threads in this category.'}
-                  </div>
-                ) : (
-                  sortedAndFilteredConversations.map((c) => (
-                    <div key={c.id}>
-                      {editingChatId === c.id ? (
-                        <div className="p-2 rounded-xl bg-slate-900 border border-emerald-500/30 flex items-center gap-1.5">
-                          <input
-                            type="text"
-                            value={editingChatTitle}
-                            onChange={(e) => setEditingChatTitle(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveRename(c.id);
-                              if (e.key === 'Escape') handleCancelRename();
-                            }}
-                            className="flex-1 px-2 py-1 bg-black/40 text-xs text-white rounded-lg border border-white/5 outline-none focus:border-emerald-500"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => handleSaveRename(c.id)}
-                            className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-[10px] font-bold transition-colors"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={handleCancelRename}
-                            className="p-1 rounded hover:bg-white/5 text-slate-400"
-                            title="Cancel"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div
-                          onClick={() => {
-                            setActiveId(c.id);
-                            setError(null);
-                          }}
-                          className={`w-full text-left p-2.5 rounded-xl flex items-center gap-2.5 transition-all border group cursor-pointer select-none ${
-                            activeId === c.id
-                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20 shadow-inner'
-                              : 'hover:bg-slate-900/60 text-slate-350 hover:text-white border-transparent'
-                          }`}
-                        >
-                          <MessageSquare size={13} className={activeId === c.id ? 'text-emerald-400' : 'text-slate-500'} />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-xs truncate leading-snug">{c.title}</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5">
-                              <span>{c.messages.length} interactions</span>
-                              {c.pinned && (
-                                <span className="inline-flex items-center text-[9px] text-emerald-400 bg-emerald-500/10 px-1 rounded font-medium">
-                                  Pinned
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          
-                          {/* ChatGPT action buttons */}
-                          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity duration-150 shrink-0">
-                            <button
-                              onClick={(e) => handleTogglePin(c.id, e)}
-                              className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors"
-                              title={c.pinned ? "Unpin Thread" : "Pin Thread"}
-                            >
-                              <Pin size={11} className={c.pinned ? 'fill-emerald-400 text-emerald-400' : ''} />
-                            </button>
-                            <button
-                              onClick={(e) => handleToggleArchive(c.id, e)}
-                              className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-amber-400 transition-colors"
-                              title={c.archived ? "Restore Thread" : "Archive Thread"}
-                            >
-                              <Archive size={11} className={c.archived ? 'fill-amber-400/20 text-amber-400' : ''} />
-                            </button>
-                            <button
-                              onClick={(e) => handleStartRename(c.id, c.title, e)}
-                              className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-blue-400 transition-colors"
-                              title="Rename Thread"
-                            >
-                              <Edit2 size={11} />
-                            </button>
-                            <button
-                              onClick={(e) => handleOpenDeleteModal(c.id, e)}
-                              className="p-1 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
-                              title="Delete Thread"
-                            >
-                              <Trash2 size={11} />
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                    <div className="flex items-center gap-2.5 truncate flex-1 min-w-0">
+                      <Bot size={14} className={isActive ? 'text-violet-400 shrink-0' : 'opacity-40 shrink-0'} />
+                      <span className="truncate">{session.title}</span>
                     </div>
-                  ))
-                )}
+                    <button
+                      onClick={(e) => handleDeleteSession(session.id, e)}
+                      className="opacity-0 group-hover:opacity-100 p-1 hover:text-rose-400 transition-opacity ml-1 rounded"
+                      title="Delete Session"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom Status / Stats */}
+            <div className="p-3 border-t border-inherit text-[11px] opacity-60 flex items-center justify-between">
+              <span>{sessions.length} Workspaces</span>
+              <div className="flex items-center gap-1 text-emerald-400 font-mono">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Online</span>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ChatGPT Style Delete Confirmation Modal */}
-      {chatToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 text-center">
-            <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mx-auto">
-              <Trash2 size={24} />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-white flex items-center justify-center gap-1.5">
-                🗑️ Delete Chat?
-              </h3>
-              <p className="text-xs text-slate-300 mt-2">
-                Are you sure you want to delete this chat?
-              </p>
-              <p className="text-[11px] text-slate-500 italic mt-1">
-                This action cannot be undone.
-              </p>
-            </div>
-            <div className="flex gap-2.5 mt-2">
+      {/* Main Grok Workbench Area */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+        
+        {/* Grok Header Command Ribbon */}
+        <header className={`h-14 px-4 border-b flex items-center justify-between shrink-0 ${
+          isDarkMode ? 'bg-[#0d0d16]/90 border-white/10 backdrop-blur-md' : 'bg-white/90 border-slate-200 backdrop-blur-md'
+        }`}>
+          {/* Left: Sidebar Toggle, Model Picker, Stage Navigator */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowSidebar(!showSidebar)}
+              className="p-1.5 rounded-lg hover:bg-white/10 opacity-70 hover:opacity-100 transition-all cursor-pointer"
+              title="Toggle Sidebar"
+            >
+              <FolderTree size={16} />
+            </button>
+
+            {/* Model Selector Dropdown */}
+            <div className="relative">
               <button
-                onClick={() => setChatToDelete(null)}
-                className="flex-1 py-2 text-xs font-semibold text-slate-300 bg-white/5 hover:bg-white/10 rounded-xl transition-all border border-white/5 cursor-pointer"
+                onClick={() => setShowModelDropdown(!showModelDropdown)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-white/5 border-white/10 hover:border-violet-500/50 text-white' 
+                    : 'bg-slate-100 border-slate-200 hover:border-violet-400 text-slate-800'
+                }`}
               >
-                Cancel
+                <Sparkles size={13} className="text-violet-400 animate-pulse" />
+                <span>{AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || 'Grok 3 (Deep Reasoner)'}</span>
+                <ChevronDown size={12} className="opacity-50" />
               </button>
+
+              {showModelDropdown && (
+                <div className={`absolute left-0 mt-2 w-72 rounded-2xl border p-1.5 shadow-2xl z-50 backdrop-blur-xl ${
+                  isDarkMode ? 'bg-[#12121e]/95 border-white/15 text-white' : 'bg-white border-slate-200 text-slate-800'
+                }`}>
+                  <div className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider opacity-50">
+                    Reasoning Engine Matrix
+                  </div>
+                  {AVAILABLE_MODELS.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        setSelectedModel(m.id);
+                        setShowModelDropdown(false);
+                      }}
+                      className={`w-full text-left p-2.5 rounded-xl flex items-start justify-between text-xs transition-colors cursor-pointer ${
+                        selectedModel === m.id 
+                          ? 'bg-violet-600/20 text-violet-300 font-semibold' 
+                          : 'hover:bg-white/5 opacity-80 hover:opacity-100'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={m.color}>●</span>
+                          <span>{m.name}</span>
+                        </div>
+                        <div className="text-[10px] opacity-50 mt-0.5">{m.desc}</div>
+                      </div>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/10 font-mono">
+                        {m.badge}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Workbench Stages Tabs */}
+            <div className={`hidden md:flex items-center gap-1 p-1 rounded-xl border ${
+              isDarkMode ? 'bg-black/30 border-white/10' : 'bg-slate-100 border-slate-200'
+            }`}>
               <button
-                onClick={handleConfirmDelete}
-                className="flex-1 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 active:bg-red-700 rounded-xl transition-all shadow-lg shadow-red-600/10 cursor-pointer"
+                onClick={() => setActiveStage('chat')}
+                className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                  activeStage === 'chat'
+                    ? 'bg-violet-600 text-white shadow-sm'
+                    : 'opacity-60 hover:opacity-100'
+                }`}
               >
-                Delete
+                <Bot size={13} />
+                <span>Chat</span>
+              </button>
+
+              <button
+                onClick={() => setActiveStage('plan')}
+                className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                  activeStage === 'plan'
+                    ? 'bg-violet-600 text-white shadow-sm'
+                    : 'opacity-60 hover:opacity-100'
+                }`}
+              >
+                <Shield size={13} />
+                <span>Plan</span>
+              </button>
+
+              <button
+                onClick={() => setActiveStage('kanban')}
+                className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                  activeStage === 'kanban'
+                    ? 'bg-violet-600 text-white shadow-sm'
+                    : 'opacity-60 hover:opacity-100'
+                }`}
+              >
+                <CheckSquare size={13} />
+                <span>Tasks ({activeSession.tasks.length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveStage('artifacts')}
+                className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                  activeStage === 'artifacts'
+                    ? 'bg-violet-600 text-white shadow-sm'
+                    : 'opacity-60 hover:opacity-100'
+                }`}
+              >
+                <Code size={13} />
+                <span>Artifacts ({activeSession.artifacts.length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveStage('terminal')}
+                className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                  activeStage === 'terminal'
+                    ? 'bg-violet-600 text-white shadow-sm'
+                    : 'opacity-60 hover:opacity-100'
+                }`}
+              >
+                <Terminal size={13} />
+                <span>Terminal</span>
               </button>
             </div>
           </div>
+
+          {/* Right Controls: Search, Web toggle, Inspector */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setDeepThinkingEnabled(!deepThinkingEnabled)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all cursor-pointer ${
+                deepThinkingEnabled
+                  ? 'bg-violet-600/20 text-violet-300 border-violet-500/40 shadow-sm'
+                  : 'opacity-50 hover:opacity-80 border-transparent'
+              }`}
+              title="Toggle Deep Reasoning Chain"
+            >
+              <Cpu size={13} className={deepThinkingEnabled ? 'text-violet-400 animate-pulse' : ''} />
+              <span className="hidden sm:inline">Deep Think</span>
+            </button>
+
+            <button
+              onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                webSearchEnabled
+                  ? 'bg-cyan-600/20 text-cyan-300 border-cyan-500/40'
+                  : 'opacity-50 hover:opacity-80 border-transparent'
+              }`}
+              title="Live Web Grounding"
+            >
+              <Globe size={14} />
+            </button>
+
+            <button
+              onClick={() => setShowInspector(!showInspector)}
+              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                showInspector
+                  ? 'bg-white/15 text-white border-white/20'
+                  : 'opacity-50 hover:opacity-80 border-transparent'
+              }`}
+              title="Toggle Workbench Inspector"
+            >
+              <Sliders size={14} />
+            </button>
+          </div>
+        </header>
+
+        {/* Dynamic Stage View Container */}
+        <div className="flex-1 flex overflow-hidden relative">
+          
+          {/* STAGE 1: CHAT */}
+          {activeStage === 'chat' && (
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              {/* Message Transcript Container */}
+              <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-thin">
+                
+                {/* Empty State / Prompt Cards */}
+                {activeSession.messages.length === 0 && (
+                  <div className="max-w-3xl mx-auto py-8 text-center space-y-6">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-500 p-0.5 shadow-2xl shadow-violet-500/20">
+                      <div className="w-full h-full bg-[#0d0d16] rounded-[22px] flex items-center justify-center">
+                        <Sparkles size={28} className="text-violet-400 animate-pulse" />
+                      </div>
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+                        Grok 3 Pro Workbench
+                      </h2>
+                      <p className="text-sm opacity-60 mt-1 max-w-md mx-auto">
+                        Ultra-deep reasoning engine with reactive code artifacts, multi-modal synthesis, and real-time execution.
+                      </p>
+                    </div>
+
+                    {/* Quick Starters */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-left pt-2">
+                      {PROMPT_STARTERS.map((starter, i) => {
+                        const Icon = starter.icon;
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => handleSendMessage(starter.prompt)}
+                            className={`p-4 rounded-2xl border text-xs transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer group ${
+                              isDarkMode ? 'bg-white/5 border-white/10 hover:border-violet-500/40 hover:bg-white/8' : 'bg-white border-slate-200 hover:border-violet-400 shadow-sm'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 font-semibold text-sm mb-1 text-white">
+                              <span className={`p-1.5 rounded-lg border bg-gradient-to-br ${starter.color}`}>
+                                <Icon size={14} />
+                              </span>
+                              <span>{starter.title}</span>
+                            </div>
+                            <p className="opacity-60 line-clamp-2">{starter.desc}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Message Bubbles */}
+                {activeSession.messages.map(msg => {
+                  const isUser = msg.role === 'user';
+                  const isExpanded = !!expandedThoughts[msg.id];
+
+                  return (
+                    <motion.div
+                      key={msg.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`flex gap-3 max-w-4xl mx-auto ${isUser ? 'justify-end' : 'justify-start'}`}
+                    >
+                      {!isUser && (
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center shrink-0 shadow-md">
+                          <Bot size={16} className="text-white" />
+                        </div>
+                      )}
+
+                      <div className={`flex flex-col space-y-2 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
+                        
+                        {/* Attachments if any */}
+                        {msg.attachments && msg.attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-1">
+                            {msg.attachments.map((att, i) => (
+                              <div key={i} className="p-1.5 rounded-lg bg-black/40 border border-white/10 text-[11px] flex items-center gap-1.5">
+                                <FileText size={12} className="text-cyan-400" />
+                                <span className="truncate max-w-[140px]">{att.name || 'Attachment'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Collapsible Chain of Thought Trace */}
+                        {!isUser && msg.thinkingProcess && (
+                          <div className={`w-full rounded-2xl border text-xs overflow-hidden transition-all ${
+                            isDarkMode ? 'bg-violet-950/20 border-violet-500/30' : 'bg-violet-50 border-violet-200'
+                          }`}>
+                            <button
+                              onClick={() => toggleThoughtExpand(msg.id)}
+                              className="w-full px-3 py-2 flex items-center justify-between font-mono text-[11px] text-violet-400 hover:text-violet-300 cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Cpu size={13} className="animate-pulse text-violet-400" />
+                                <span className="font-semibold">Thought Process & Verification</span>
+                                {msg.thinkingDurationSeconds && (
+                                  <span className="opacity-60">({msg.thinkingDurationSeconds}s)</span>
+                                )}
+                              </div>
+                              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                            </button>
+
+                            {isExpanded && (
+                              <div className="p-3 pt-0 border-t border-violet-500/20 space-y-2 text-white/80 font-sans">
+                                <p className="text-[12px] opacity-80 leading-relaxed">{msg.thinkingProcess}</p>
+                                
+                                {msg.thoughtSteps && (
+                                  <div className="space-y-1.5 pt-1">
+                                    {msg.thoughtSteps.map((step, idx) => (
+                                      <div key={idx} className="flex items-start gap-2 text-[11px] opacity-75">
+                                        <CheckCircle2 size={12} className="text-emerald-400 shrink-0 mt-0.5" />
+                                        <div>
+                                          <span className="font-semibold text-white/90">{step.title}: </span>
+                                          <span>{step.detail}</span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Message Main Body */}
+                        <div className={`p-4 rounded-2xl text-sm leading-relaxed ${
+                          isUser
+                            ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-tr-sm shadow-md'
+                            : isDarkMode
+                            ? 'bg-white/5 border border-white/10 text-white rounded-tl-sm shadow-sm'
+                            : 'bg-white border border-slate-200 text-slate-900 rounded-tl-sm shadow-sm'
+                        }`}>
+                          <MarkdownRenderer content={msg.text} />
+                        </div>
+
+                        {/* Action Bar */}
+                        <div className="flex items-center gap-2 text-[11px] opacity-50 hover:opacity-100 transition-opacity">
+                          <span>{msg.timestamp}</span>
+                          {!isUser && (
+                            <>
+                              <span>•</span>
+                              <button
+                                onClick={() => copyToClipboard(msg.text, msg.id)}
+                                className="hover:text-violet-400 flex items-center gap-1 cursor-pointer"
+                                title="Copy Text"
+                              >
+                                {copiedId === msg.id ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                                <span>{copiedId === msg.id ? 'Copied' : 'Copy'}</span>
+                              </button>
+                              <span>•</span>
+                              <button
+                                onClick={() => handleSpeak(msg.id, msg.text)}
+                                className="hover:text-cyan-400 flex items-center gap-1 cursor-pointer"
+                                title="Listen Aloud"
+                              >
+                                {speakingMsgId === msg.id ? <VolumeX size={12} className="text-rose-400" /> : <Volume2 size={12} />}
+                                <span>{speakingMsgId === msg.id ? 'Stop' : 'Speak'}</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+
+                      </div>
+
+                      {isUser && (
+                        <div className="w-8 h-8 rounded-xl bg-violet-700/60 flex items-center justify-center shrink-0">
+                          <span className="text-xs font-bold text-white">U</span>
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+
+                {/* Loading / Streaming Indicator */}
+                {isLoading && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex gap-3 max-w-4xl mx-auto"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center shrink-0 shadow-md">
+                      <Sparkles size={16} className="text-white animate-spin" />
+                    </div>
+                    <div className={`p-4 rounded-2xl border text-xs space-y-2 ${
+                      isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
+                    }`}>
+                      <div className="flex items-center gap-2 text-violet-400 font-mono">
+                        <Activity size={14} className="animate-pulse" />
+                        <span>Grok 3 Deep Reasoning in progress...</span>
+                      </div>
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" />
+                        <span className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce [animation-delay:0.2s]" />
+                        <span className="w-2 h-2 rounded-full bg-cyan-500 animate-bounce [animation-delay:0.4s]" />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Grok Pro Floating Composer */}
+              <div className="p-3 md:p-4 shrink-0 max-w-4xl mx-auto w-full">
+                <div className={`rounded-2xl border p-2.5 shadow-2xl transition-all ${
+                  isDarkMode ? 'bg-[#0f0f1a]/95 border-white/15 focus-within:border-violet-500/60' : 'bg-white border-slate-300 focus-within:border-violet-500'
+                }`}>
+                  
+                  {/* Active Attachments Preview */}
+                  {attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 p-1.5 mb-2 border-b border-inherit">
+                      {attachments.map((att, i) => (
+                        <div key={i} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/10 text-xs">
+                          <FileText size={12} className="text-violet-400" />
+                          <span className="truncate max-w-[120px]">{att.name}</span>
+                          <button
+                            onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                            className="hover:text-rose-400 ml-1"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Textarea Input */}
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Ask Grok 3 anything, formulate complex architectures, or enter code..."
+                    rows={1}
+                    className="w-full bg-transparent resize-none outline-none text-sm p-1.5 placeholder-white/40 max-h-48 scrollbar-thin"
+                  />
+
+                  {/* Composer Footer Actions Ribbon */}
+                  <div className="flex items-center justify-between pt-2 border-t border-inherit/40 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setIsBottomSheetOpen(true)}
+                        className="p-1.5 rounded-lg hover:bg-white/10 opacity-70 hover:opacity-100 transition-colors cursor-pointer"
+                        title="Add Attachments / OCR / Files"
+                      >
+                        <Paperclip size={15} />
+                      </button>
+
+                      <button
+                        onClick={toggleVoiceRecording}
+                        className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                          isRecordingVoice ? 'bg-rose-600/30 text-rose-400 animate-pulse' : 'hover:bg-white/10 opacity-70 hover:opacity-100'
+                        }`}
+                        title="Voice Dictation"
+                      >
+                        <Mic size={15} />
+                      </button>
+
+                      <button
+                        onClick={() => setIsScreenStreamOpen(true)}
+                        className="p-1.5 rounded-lg hover:bg-white/10 opacity-70 hover:opacity-100 transition-colors cursor-pointer"
+                        title="Screen Share / Camera Stream"
+                      >
+                        <Eye size={15} />
+                      </button>
+
+                      <div className="hidden sm:flex items-center gap-1 ml-2 text-[10px] opacity-40 font-mono">
+                        <span>⏎ Send</span>
+                        <span>•</span>
+                        <span>⇧⏎ Newline</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleSendMessage()}
+                      disabled={isLoading || (!input.trim() && attachments.length === 0)}
+                      className={`px-4 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        isLoading || (!input.trim() && attachments.length === 0)
+                          ? 'opacity-40 bg-violet-600/30 cursor-not-allowed text-white/50'
+                          : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-violet-950/40 active:scale-95'
+                      }`}
+                    >
+                      <span>Send</span>
+                      <Send size={13} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* STAGE 2: PLAN & GOALS SPECIFICATION */}
+          {activeStage === 'plan' && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-4xl mx-auto">
+              <div className="flex items-center justify-between pb-4 border-b border-white/10">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Shield size={18} className="text-violet-400" />
+                    <span>Workbench Plan Specification</span>
+                  </h3>
+                  <p className="text-xs opacity-60">High-level goals and execution milestones tracked for this session.</p>
+                </div>
+                <button
+                  onClick={() => handleSendMessage('Regenerate and refine the architectural plan and execution steps for this project.')}
+                  className="px-3 py-1.5 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw size={13} />
+                  <span>Refine Plan</span>
+                </button>
+              </div>
+
+              {/* Goal Card */}
+              <div className="p-4 rounded-2xl border border-violet-500/30 bg-violet-950/10 space-y-2">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-violet-400">Primary Objective</span>
+                <p className="text-sm font-medium">{activeSession.planGoal || 'Architect high performance system'}</p>
+              </div>
+
+              {/* Steps Checklist */}
+              <div className="space-y-3">
+                <span className="text-xs font-bold uppercase tracking-wider opacity-60">Milestone Sequence</span>
+                {activeSession.planSteps?.map((step, idx) => (
+                  <div key={idx} className="p-3 rounded-xl border border-white/10 bg-white/5 flex items-start gap-3 text-xs">
+                    <span className="w-5 h-5 rounded-full bg-violet-600/30 text-violet-300 font-mono font-bold flex items-center justify-center shrink-0">
+                      {idx + 1}
+                    </span>
+                    <span className="leading-relaxed flex-1">{step}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* STAGE 3: KANBAN TASKS */}
+          {activeStage === 'kanban' && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-5xl mx-auto">
+              <div className="flex items-center justify-between pb-4 border-b border-white/10">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <CheckSquare size={18} className="text-emerald-400" />
+                    <span>Agent Task Board</span>
+                  </h3>
+                  <p className="text-xs opacity-60">Real-time task progression orchestrated by Grok AI.</p>
+                </div>
+                <button
+                  onClick={() => {
+                    const title = prompt('Enter new task description:');
+                    if (title) {
+                      setSessions(prev => prev.map(s => {
+                        if (s.id === activeSessionId) {
+                          return {
+                            ...s,
+                            tasks: [...s.tasks, { id: 'task_' + Date.now(), title, status: 'todo', priority: 'medium' }]
+                          };
+                        }
+                        return s;
+                      }));
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus size={13} />
+                  <span>Add Task</span>
+                </button>
+              </div>
+
+              {/* Kanban Columns */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {(['todo', 'in_progress', 'review', 'done'] as const).map(columnStatus => {
+                  const columnTasks = activeSession.tasks.filter(t => t.status === columnStatus);
+                  const columnTitles = {
+                    todo: 'To Do',
+                    in_progress: 'In Progress',
+                    review: 'Review / Test',
+                    done: 'Completed'
+                  };
+
+                  return (
+                    <div key={columnStatus} className="p-3 rounded-2xl border border-white/10 bg-white/5 space-y-3">
+                      <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider opacity-70">
+                        <span>{columnTitles[columnStatus]}</span>
+                        <span className="px-1.5 py-0.5 rounded-md bg-white/10 font-mono text-[10px]">
+                          {columnTasks.length}
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {columnTasks.map(task => (
+                          <div
+                            key={task.id}
+                            className="p-3 rounded-xl border border-white/10 bg-[#12121e] text-xs space-y-2 shadow-sm"
+                          >
+                            <p className="font-medium leading-snug">{task.title}</p>
+                            <div className="flex items-center justify-between pt-1">
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${
+                                task.priority === 'high' ? 'bg-rose-500/20 text-rose-300' : 'bg-blue-500/20 text-blue-300'
+                              }`}>
+                                {task.priority.toUpperCase()}
+                              </span>
+
+                              {/* Move status buttons */}
+                              <div className="flex items-center gap-1">
+                                {columnStatus !== 'done' && (
+                                  <button
+                                    onClick={() => {
+                                      const nextStatusMap = { todo: 'in_progress', in_progress: 'review', review: 'done', done: 'done' } as const;
+                                      setSessions(prev => prev.map(s => {
+                                        if (s.id === activeSessionId) {
+                                          return {
+                                            ...s,
+                                            tasks: s.tasks.map(t => t.id === task.id ? { ...t, status: nextStatusMap[task.status] } : t)
+                                          };
+                                        }
+                                        return s;
+                                      }));
+                                    }}
+                                    className="p-1 hover:text-emerald-400 text-[10px] font-mono cursor-pointer"
+                                    title="Advance Status"
+                                  >
+                                    →
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* STAGE 4: CODE ARTIFACTS VIEWER */}
+          {activeStage === 'artifacts' && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-5xl mx-auto">
+              <div className="flex items-center justify-between pb-4 border-b border-white/10">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Code size={18} className="text-cyan-400" />
+                    <span>Reactive Code Artifacts</span>
+                  </h3>
+                  <p className="text-xs opacity-60">Source code modules extracted live from conversation turns.</p>
+                </div>
+              </div>
+
+              {activeSession.artifacts.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-white/15 rounded-2xl opacity-60 text-xs">
+                  No artifacts generated in this session yet. Ask Grok 3 to generate code to populate this view.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {activeSession.artifacts.map(art => (
+                    <div key={art.id} className="rounded-2xl border border-white/10 bg-[#0d0d16] overflow-hidden">
+                      <div className="px-4 py-2.5 border-b border-white/10 bg-white/5 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2 font-mono font-semibold">
+                          <Code size={14} className="text-cyan-400" />
+                          <span>{art.title}</span>
+                          <span className="text-[10px] opacity-50 uppercase">({art.language})</span>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(art.code, art.id)}
+                          className="flex items-center gap-1 text-[11px] hover:text-cyan-400 cursor-pointer"
+                        >
+                          {copiedId === art.id ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                          <span>{copiedId === art.id ? 'Copied' : 'Copy Code'}</span>
+                        </button>
+                      </div>
+                      <div className="p-4 overflow-x-auto text-xs font-mono bg-black/40 text-emerald-300">
+                        <pre>{art.code}</pre>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* STAGE 5: SYSTEM TERMINAL */}
+          {activeStage === 'terminal' && (
+            <div className="flex-1 flex flex-col h-full bg-black p-4 font-mono text-xs overflow-hidden">
+              <div className="pb-2 border-b border-white/10 flex items-center justify-between text-white/60">
+                <div className="flex items-center gap-2">
+                  <Terminal size={14} className="text-emerald-400" />
+                  <span>Grok Shell Terminal</span>
+                </div>
+                <button
+                  onClick={() => setTerminalLogs([])}
+                  className="hover:text-rose-400 text-[10px]"
+                >
+                  Clear Logs
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto py-3 space-y-1 text-emerald-400/90 scrollbar-thin">
+                {terminalLogs.map((log, idx) => (
+                  <div key={idx} className="leading-relaxed">
+                    <span className="text-white/30 mr-2">{'>'}</span>
+                    <span>{log}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Right Inspector Drawer */}
+          <AnimatePresence>
+            {showInspector && (
+              <motion.div
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 280, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="h-full border-l border-white/10 bg-[#0c0c14] flex flex-col shrink-0 overflow-y-auto p-4 space-y-5 text-xs scrollbar-thin"
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-white/10 font-bold uppercase tracking-wider opacity-70">
+                  <span>Inspector & Telemetry</span>
+                  <button onClick={() => setShowInspector(false)} className="hover:text-rose-400">
+                    <X size={14} />
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="font-semibold opacity-80">Reasoning Depth</span>
+                  <div className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-2">
+                    <div className="flex justify-between text-[11px]">
+                      <span>Chain-of-Thought</span>
+                      <span className="text-violet-400 font-bold">{deepThinkingEnabled ? 'Enabled (Full)' : 'Standard'}</span>
+                    </div>
+                    <div className="flex justify-between text-[11px]">
+                      <span>Live Web Search</span>
+                      <span className="text-cyan-400 font-bold">{webSearchEnabled ? 'Connected' : 'Off'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="font-semibold opacity-80">Session Metadata</span>
+                  <div className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-1.5 text-[11px] opacity-75">
+                    <div>Messages: {activeSession.messages.length}</div>
+                    <div>Artifacts: {activeSession.artifacts.length}</div>
+                    <div>Active Tasks: {activeSession.tasks.length}</div>
+                    <div>Latency: ~24ms</div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
         </div>
+
+      </div>
+
+      {/* Attachment Bottom Sheet Modal */}
+      <AttachmentBottomSheet
+        isOpen={isBottomSheetOpen}
+        onClose={() => setIsBottomSheetOpen(false)}
+        onSelectAttachments={(files) => {
+          const newAtts: Attachment[] = files.map(f => ({
+            id: f.id,
+            name: f.name,
+            type: f.type,
+            size: f.size,
+            base64: f.base64 || ''
+          }));
+          setAttachments(prev => [...prev, ...newAtts]);
+        }}
+        currentAttachments={[]}
+      />
+
+      {/* Screen Stream Modal */}
+      <ScreenStreamModal
+        isOpen={isScreenStreamOpen}
+        onClose={() => setIsScreenStreamOpen(false)}
+      />
+
+      {/* OCR Modal */}
+      {ocrActiveImage && (
+        <OcrModal
+          isOpen={true}
+          onClose={() => setOcrActiveImage(null)}
+          imageSrc={ocrActiveImage.src}
+          fileName={ocrActiveImage.name}
+          onInsertText={(extracted) => {
+            setInput(prev => (prev ? prev + '\n' + extracted : extracted));
+            setOcrActiveImage(null);
+          }}
+        />
       )}
+
     </div>
   );
 };

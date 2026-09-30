@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { WorkspaceWidget } from '../components/WorkspaceWidget';
 import { sounds, triggerHaptic } from '../components/PremiumEffects';
 import { useAutoSaveDraft } from '../hooks/useAutoSaveDraft';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
 
 // ─── THEMES ──────────────────────────────────────────────
 const T = {
@@ -470,12 +471,16 @@ export const LiquidChatMode: React.FC = () => {
     }));
   }, [messages, currentSession]);
 
-  useEffect(() => {
-    localStorage.setItem('omnichat_liquid_sessions', JSON.stringify(sessions));
-  }, [sessions]);
+  // Periodic and unload auto-save for Liquid chat sessions & active session
+  usePeriodicAutoSave('omnichat_liquid_sessions', sessions, {
+    intervalMs: 1500
+  });
+
+  usePeriodicAutoSave('omnichat_liquid_current_session', currentSession, {
+    intervalMs: 1500
+  });
 
   useEffect(() => {
-    localStorage.setItem('omnichat_liquid_current_session', currentSession);
     const session = sessions.find(s => s.id === currentSession);
     if (session) {
       setMessages(session.messages || []);
@@ -621,9 +626,10 @@ export const LiquidChatMode: React.FC = () => {
       setIsRecording(true);
       setStatus('listening');
     } catch (error) {
-      console.error('Error accessing microphone:', error);
+      console.warn('Error accessing microphone:', error);
       setMicPermissionError(true);
       setStatus('idle');
+      setIsRecording(false);
     }
   };
 

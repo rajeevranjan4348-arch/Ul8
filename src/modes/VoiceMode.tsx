@@ -773,8 +773,8 @@ export const VoiceMode: React.FC = () => {
       micGain.connect(processorRef.current);
       processorRef.current.connect(audioContextRef.current.destination);
     } catch (err) {
-      console.error('Microphone error:', err);
-      setError('Could not access microphone.');
+      console.warn('Microphone access blocked or unavailable:', err);
+      setError('Could not access microphone. Grant microphone permissions or open in new tab.');
       setMicPermissionError(true);
       disconnect();
     }

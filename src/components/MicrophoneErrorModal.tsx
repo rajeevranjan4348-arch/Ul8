@@ -1,31 +1,70 @@
-import React from 'react';
-import { X, AlertTriangle, MicOff, ExternalLink, Lock, Settings } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, MicOff, Mic, CheckCircle2, Sparkles, RefreshCw, AlertCircle } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 
 export const MicrophoneErrorModal: React.FC = () => {
   const { micPermissionError, setMicPermissionError } = useSettings();
+  const [testingMic, setTestingMic] = useState(false);
+  const [testResult, setTestResult] = useState<'success' | 'failed' | null>(null);
 
   if (!micPermissionError) return null;
 
+  const handleRequestMicPermission = async () => {
+    setTestingMic(true);
+    setTestResult(null);
+    try {
+      if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+        setTestResult('success');
+        setTimeout(() => {
+          setMicPermissionError(false);
+          setTestResult(null);
+        }, 1200);
+      } else {
+        setTestResult('failed');
+      }
+    } catch (e: any) {
+      console.warn('Microphone permission request was denied or unavailable in this iframe context:', e);
+      setTestResult('failed');
+    } finally {
+      setTestingMic(false);
+    }
+  };
+
+  const handleSimulateVoice = () => {
+    setMicPermissionError(false);
+    // Dispatch a simulated voice command to the app
+    const simulatedQueries = [
+      "What are the best places to visit in Japan?",
+      "Explain the theory of relativity simply.",
+      "Write a short python function for binary search.",
+      "Summarize the latest AI breakthrough."
+    ];
+    const chosen = simulatedQueries[Math.floor(Math.random() * simulatedQueries.length)];
+    localStorage.setItem('omnichat_pending_query', chosen);
+    window.dispatchEvent(new CustomEvent('workspace-insert-text', { detail: chosen }));
+  };
+
   return (
     <div 
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
       id="mic-error-backdrop"
       onClick={() => setMicPermissionError(false)}
     >
       <div 
-        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-red-500/20 bg-slate-950/90 p-6 shadow-2xl shadow-red-500/10 md:p-8 animate-scale-in"
+        className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-violet-500/30 bg-slate-950/95 p-6 shadow-2xl shadow-violet-500/10 md:p-8 animate-scale-in"
         onClick={e => e.stopPropagation()}
         id="mic-error-container"
       >
         {/* Background Decorative Blur */}
-        <div className="absolute -top-12 -left-12 w-32 h-32 bg-red-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-violet-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -top-12 -left-12 w-32 h-32 bg-red-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-violet-500/20 rounded-full blur-3xl pointer-events-none" />
 
         {/* Close Button */}
         <button 
           onClick={() => setMicPermissionError(false)}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all"
+          className="absolute top-4 right-4 p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
           title="Dismiss"
           id="mic-error-close-btn"
         >
@@ -33,80 +72,97 @@ export const MicrophoneErrorModal: React.FC = () => {
         </button>
 
         {/* Header Icon */}
-        <div className="flex items-center gap-4 mb-6">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-400 border border-red-500/20">
+        <div className="flex items-center gap-4 mb-5">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-red-500/20 to-violet-500/20 text-red-400 border border-red-500/30 shadow-inner">
             <MicOff size={24} className="animate-pulse" />
           </div>
           <div>
-            <h2 className="text-xl font-semibold text-white tracking-tight">Microphone Access Denied</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Permission blocked by browser settings</p>
+            <h2 className="text-lg font-bold text-white tracking-tight">Microphone Access Notice</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Browser microphone permissions or iframe sandboxing</p>
           </div>
         </div>
 
-        {/* Context / Cause */}
-        <div className="bg-slate-900/60 rounded-xl p-4 border border-slate-800/80 mb-6 text-sm text-slate-300 leading-relaxed">
-          <span className="font-semibold text-slate-200">Why did this happen?</span> Modern web browsers block microphone and camera access inside sandboxed <span className="text-violet-400 font-medium">iframes</span> (like this preview pane) for security.
+        {/* Status Message */}
+        <div className="bg-slate-900/80 rounded-2xl p-4 border border-slate-800 mb-5 text-xs sm:text-sm text-slate-300 leading-relaxed space-y-2">
+          <p>
+            <strong className="text-white font-semibold">Why does this happen?</strong> Modern browsers restrict microphone hardware access inside embedded preview frames for security.
+          </p>
+          <p className="text-slate-400 text-xs">
+            You can grant microphone access directly, open the app in a new tab, or use simulated voice input below.
+          </p>
         </div>
 
-        {/* Fix Steps */}
-        <div className="space-y-4 mb-8">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Recommended Solutions</h3>
+        {/* Action feedback */}
+        {testResult === 'success' && (
+          <div className="mb-4 p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2 animate-fade-in">
+            <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+            <span>Microphone access granted successfully! Resuming...</span>
+          </div>
+        )}
 
-          {/* Step 1: Open in New Tab */}
-          <div className="flex gap-3 items-start">
-            <div className="flex h-6 w-6 mt-0.5 shrink-0 items-center justify-center rounded-md bg-violet-500/15 text-violet-400 border border-violet-500/10 text-xs font-bold">
+        {testResult === 'failed' && (
+          <div className="mb-4 p-3 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs flex items-center gap-2 animate-fade-in">
+            <AlertCircle size={16} className="text-amber-400 shrink-0" />
+            <span>Still blocked in this frame. Open in New Tab or use Simulate Voice Input.</span>
+          </div>
+        )}
+
+        {/* Solution Steps */}
+        <div className="space-y-3 mb-6 text-xs text-slate-300">
+          <div className="flex gap-3 items-start p-2.5 rounded-xl bg-slate-900/40 border border-white/5">
+            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-violet-500/20 text-violet-400 font-bold text-[10px]">
               1
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-200 flex items-center gap-1.5">
-                Open App in a New Tab
-                <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/10 text-emerald-400 rounded">Recommended</span>
-              </p>
-              <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                Click the <strong className="text-slate-300">"Open App in New Tab"</strong> button in the very top-right of the AI Studio preview to bypass iframe sandboxing and trigger the browser's native microphone request.
-              </p>
+              <span className="font-semibold text-white">Click "Request Mic Access" below</span>
+              <p className="text-[11px] text-slate-400 mt-0.5">Triggers your browser's native permission prompt directly.</p>
             </div>
           </div>
 
-          {/* Step 2: Address Bar Permission */}
-          <div className="flex gap-3 items-start">
-            <div className="flex h-6 w-6 mt-0.5 shrink-0 items-center justify-center rounded-md bg-violet-500/15 text-violet-400 border border-violet-500/10 text-xs font-bold">
+          <div className="flex gap-3 items-start p-2.5 rounded-xl bg-slate-900/40 border border-white/5">
+            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-indigo-500/20 text-indigo-400 font-bold text-[10px]">
               2
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-200">Allow in Browser Address Bar</p>
-              <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                Look for a <strong className="text-slate-300">microphone icon with a red slash</strong> or a <strong className="text-slate-300">lock icon</strong> in the left of the address bar. Click it, then change the permission settings to <strong className="text-emerald-400 font-semibold">Allow</strong>.
-              </p>
-            </div>
-          </div>
-
-          {/* Step 3: Device Preferences */}
-          <div className="flex gap-3 items-start">
-            <div className="flex h-6 w-6 mt-0.5 shrink-0 items-center justify-center rounded-md bg-violet-500/15 text-violet-400 border border-violet-500/10 text-xs font-bold">
-              3
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-200">Select Input Device</p>
-              <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                Ensure your preferred microphone is connected, active, and selected as the input source under <strong className="text-slate-300">Settings &gt; Audio Settings</strong>.
-              </p>
+              <span className="font-semibold text-white">Open in New Tab</span>
+              <p className="text-[11px] text-slate-400 mt-0.5">Click the "Open App in New Tab" icon in top-right for direct hardware access.</p>
             </div>
           </div>
         </div>
 
-        {/* Buttons */}
+        {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row gap-2.5">
           <button
-            onClick={() => setMicPermissionError(false)}
-            className="flex-1 justify-center py-2.5 px-4 rounded-xl text-sm font-medium text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 shadow-md shadow-violet-900/20 active:scale-[0.98] transition-all flex items-center gap-2"
-            id="mic-error-tab-btn"
+            onClick={handleRequestMicPermission}
+            disabled={testingMic}
+            className="flex-1 justify-center py-2.5 px-4 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 shadow-md shadow-violet-900/20 active:scale-[0.98] transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            id="mic-error-request-btn"
           >
-            <span>Got it, thank you</span>
+            {testingMic ? (
+              <>
+                <RefreshCw size={14} className="animate-spin" />
+                <span>Checking...</span>
+              </>
+            ) : (
+              <>
+                <Mic size={14} />
+                <span>Request Mic Access</span>
+              </>
+            )}
           </button>
+
+          <button
+            onClick={handleSimulateVoice}
+            className="flex-1 justify-center py-2.5 px-4 rounded-xl text-xs font-semibold text-cyan-300 bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer"
+            id="mic-error-simulate-btn"
+          >
+            <Sparkles size={14} className="text-cyan-400" />
+            <span>Simulate Voice Input</span>
+          </button>
+
           <button
             onClick={() => setMicPermissionError(false)}
-            className="sm:px-6 py-2.5 rounded-xl text-sm font-medium text-slate-300 bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all active:scale-[0.98]"
+            className="px-4 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer"
             id="mic-error-dismiss-btn"
           >
             Dismiss

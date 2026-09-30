@@ -57,13 +57,9 @@ const itemVariants = {
 
 const QUICK_ACTIONS = [
   { id: 'omni-chat', label: 'Omni Chat', desc: 'Chat with Gemini AI', icon: Bot, color: 'from-violet-500 to-purple-600' },
-  { id: 'jarvis', label: 'J.A.R.V.I.S.', desc: 'HUD command interface', icon: Cpu, color: 'from-cyan-500 to-blue-600' },
+  { id: 'chat-pro', label: 'Grok Workbench', desc: 'Deep reasoning & artifacts', icon: Sparkles, color: 'from-violet-500 to-indigo-600' },
   { id: 'coder', label: 'AI Coder', desc: 'Code generation IDE', icon: Code, color: 'from-emerald-500 to-green-600' },
   { id: 'voice-live', label: 'Voice AI', desc: 'Live voice interaction', icon: Mic, color: 'from-rose-500 to-red-600' },
-  { id: 'search-maps', label: 'Search & Maps', desc: 'Web + location search', icon: MapPin, color: 'from-orange-500 to-amber-600' },
-  { id: 'liquid-chat', label: 'Liquid Chat', desc: 'Animated chat modes', icon: Sparkles, color: 'from-pink-500 to-fuchsia-600' },
-  { id: 'transcription', label: 'Transcribe', desc: 'Audio to text', icon: FileAudio, color: 'from-teal-500 to-cyan-600' },
-  { id: 'tts', label: 'Text to Speech', desc: 'AI voice synthesis', icon: Volume2, color: 'from-indigo-500 to-blue-600' },
   { id: 'image-gen', label: 'Image Gen', desc: 'Generate high-res artwork', icon: Image, color: 'from-rose-400 to-pink-500' },
 ];
 
@@ -373,7 +369,7 @@ Provide output as a strict JSON array (no markdown code blocks, no text outside 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
-    onModeChange('search-maps');
+    onModeChange('omni-chat');
   };
 
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });

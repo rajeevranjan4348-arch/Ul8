@@ -9,6 +9,7 @@ import { ThinkingLevel, Type } from '@google/genai';
 import { Settings2, Globe, UserCircle, Link as LinkIcon, Trash2, Plus, MessageSquare, Brain, Pin, PinOff } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
 import { motion, AnimatePresence } from 'motion/react';
 import { Panel, Group, Separator } from 'react-resizable-panels';
 
@@ -110,37 +111,15 @@ export const ChatMode: React.FC<ChatModeProps> = ({ mode }) => {
     }
   }, [conversations, currentConversationId]);
 
-  useEffect(() => {
-    try {
-      const sanitized = sanitizeConversationsForStorage(conversations);
-      localStorage.setItem(`omnichat_conversations_${mode}`, JSON.stringify(sanitized));
-    } catch (error) {
-      console.warn('Failed to save to localStorage with sanitized attachments, stripping all base64...', error);
-      try {
-        const fullyPruned = conversations.map(c => ({
-          ...c,
-          messages: c.messages.map(m => {
-            if (!m.attachments || m.attachments.length === 0) return m;
-            return {
-              ...m,
-              attachments: m.attachments.map(att => ({ ...att, base64: '' }))
-            };
-          })
-        }));
-        localStorage.setItem(`omnichat_conversations_${mode}`, JSON.stringify(fullyPruned));
-      } catch (err) {
-        console.error('Even fully pruned failed to save to localStorage', err);
-      }
-    }
-  }, [conversations, mode]);
+  // Periodic and unload auto-save for conversations and active conversation
+  usePeriodicAutoSave(`omnichat_conversations_${mode}`, conversations, {
+    intervalMs: 1500,
+    sanitize: sanitizeConversationsForStorage
+  });
 
-  useEffect(() => {
-    if (currentConversationId) {
-      localStorage.setItem(`omnichat_current_conv_${mode}`, currentConversationId);
-    } else {
-      localStorage.removeItem(`omnichat_current_conv_${mode}`);
-    }
-  }, [currentConversationId, mode]);
+  usePeriodicAutoSave(`omnichat_current_conv_${mode}`, currentConversationId, {
+    intervalMs: 1500
+  });
 
   const currentConversation = conversations.find(c => c.id === currentConversationId);
   const messages = currentConversation?.messages || [];

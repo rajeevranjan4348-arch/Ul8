@@ -10,6 +10,7 @@ import { WorkspaceWidget } from '../components/WorkspaceWidget';
 import { sounds, triggerHaptic } from '../components/PremiumEffects';
 import { OcrModal } from '../components/OcrModal';
 import { useAutoSaveDraft } from '../hooks/useAutoSaveDraft';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
 
 /* ─── Keyframe animations ─────────────────────────────── */
 const STYLES = `
@@ -462,33 +463,15 @@ export const OmniChatMode: React.FC = () => {
     chatRef.current = null;
   }, [currentConversationId]);
 
-  useEffect(() => {
-    try {
-      const sanitized = sanitizeConversationsForStorage(conversations);
-      localStorage.setItem('omnichat_omni_sessions', JSON.stringify(sanitized));
-    } catch (error) {
-      console.warn('Failed to save to localStorage with sanitized attachments, stripping all base64...', error);
-      try {
-        const fullyPruned = conversations.map(c => ({
-          ...c,
-          messages: c.messages.map(m => {
-            if (!m.attachments || m.attachments.length === 0) return m;
-            return {
-              ...m,
-              attachments: m.attachments.map(att => ({ ...att, base64: '' }))
-            };
-          })
-        }));
-        localStorage.setItem('omnichat_omni_sessions', JSON.stringify(fullyPruned));
-      } catch (err) {
-        console.error('Even fully pruned failed to save to localStorage', err);
-      }
-    }
-  }, [conversations]);
+  // Periodic and unload auto-save for Omni sessions & active chat
+  usePeriodicAutoSave('omnichat_omni_sessions', conversations, {
+    intervalMs: 1500,
+    sanitize: sanitizeConversationsForStorage
+  });
 
-  useEffect(() => {
-    localStorage.setItem('omnichat_omni_current_session', currentConversationId);
-  }, [currentConversationId]);
+  usePeriodicAutoSave('omnichat_omni_current_session', currentConversationId, {
+    intervalMs: 1500
+  });
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 

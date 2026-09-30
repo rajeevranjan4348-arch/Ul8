@@ -39,6 +39,16 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
+    const msg = (error?.message || '').toLowerCase();
+    if (
+      msg.includes('cancel') ||
+      msg.includes('abort') ||
+      msg.includes('permission denied') ||
+      msg.includes('notallowederror') ||
+      msg.includes('manually canceled')
+    ) {
+      return { hasError: false };
+    }
     return {
       hasError: true,
       message: error?.message ?? 'Unknown runtime error',

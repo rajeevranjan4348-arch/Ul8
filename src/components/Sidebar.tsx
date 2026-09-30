@@ -11,13 +11,13 @@ import { useSettings } from '../contexts/SettingsContext';
 import { PremiumButton } from './PremiumEffects';
 
 interface SidebarProps {
-  currentMode: AppMode | 'liquid-chat';
-  onModeChange: (mode: AppMode | 'liquid-chat') => void;
+  currentMode: AppMode;
+  onModeChange: (mode: AppMode) => void;
   onVoiceSearchTrigger?: () => void;
 }
 
 interface SidebarItem {
-  id: AppMode | 'liquid-chat';
+  id: AppMode;
   label: string;
   icon: React.ReactNode;
 }
@@ -28,7 +28,7 @@ interface SidebarCategory {
   items: SidebarItem[];
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentMode, onModeChange, onVoiceSearchTrigger }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentMode, onModeChange }) => {
   const { getSidebarClass, getAccentClass, getBorderClass, isDarkMode } = useTheme();
   const { userProfile } = useSettings();
   const [alertCount, setAlertCount] = React.useState(0);
@@ -109,8 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentMode, onModeChange, onV
       icon: <Bot size={12} className="opacity-60" />,
       items: [
         { id: 'omni-chat', label: 'Omni Chat', icon: <Bot size={18} /> },
-        { id: 'chat-pro', label: 'Pro Chat (Thinking)', icon: <MessageSquare size={18} /> },
-        { id: 'liquid-chat', label: 'Liquid Chat', icon: <Sparkles size={18} /> },
+        { id: 'chat-pro', label: 'Grok Pro Workbench', icon: <Sparkles size={18} /> },
       ]
     },
     {
@@ -119,7 +118,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentMode, onModeChange, onV
       items: [
         { id: 'chat-fast', label: 'Manus Agent', icon: <Sparkles size={18} /> },
         { id: 'coder', label: 'AI Coder IDE', icon: <Code size={18} /> },
-        { id: 'jarvis', label: 'J.A.R.V.I.S. HUD', icon: <Cpu size={18} /> },
       ]
     },
     {
@@ -128,9 +126,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentMode, onModeChange, onV
       items: [
         { id: 'voice-live', label: 'Voice (Live API)', icon: <Mic size={18} /> },
         { id: 'image-gen', label: 'Image Generation', icon: <Image size={18} /> },
-        { id: 'search-maps', label: 'Search & Maps', icon: <MapPin size={18} /> },
-        { id: 'transcription', label: 'Transcription', icon: <FileAudio size={18} /> },
-        { id: 'tts', label: 'Text to Speech', icon: <Volume2 size={18} /> },
       ]
     },
     {
@@ -211,27 +206,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentMode, onModeChange, onV
           </span>
         </button>
       </div>
-
-      {/* Quick Voice Trigger Action */}
-      {onVoiceSearchTrigger && (
-        <div className="px-3 pt-3 pb-1">
-          <button
-            onClick={onVoiceSearchTrigger}
-            id="btn-quick-voice-search"
-            className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-300 bg-gradient-to-r from-blue-600/20 via-indigo-600/20 to-violet-600/20 hover:from-blue-600/35 hover:via-indigo-600/35 hover:to-violet-600/35 text-white/90 hover:text-white border border-indigo-500/30 hover:border-indigo-500/50 shadow-md hover:shadow-indigo-500/10 group cursor-pointer"
-          >
-            <div className="flex items-center gap-2.5">
-              <span className="p-1 rounded-lg bg-indigo-500/10 text-indigo-400 group-hover:scale-110 group-hover:bg-indigo-500/20 transition-all duration-300">
-                <Mic size={16} className="animate-pulse" />
-              </span>
-              <span className="tracking-tight text-xs">Speak to Search & Maps</span>
-            </div>
-            <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded-md uppercase font-mono group-hover:bg-indigo-500/35 transition-colors">
-              Live
-            </span>
-          </button>
-        </div>
-      )}
 
       {/* Categories & Navigation */}
       <nav className="flex-1 overflow-y-auto py-3 space-y-4 px-2 scrollbar-thin">

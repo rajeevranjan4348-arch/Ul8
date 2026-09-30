@@ -9,6 +9,7 @@ import {
 import { ScreenStreamModal } from './ScreenStreamModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { OcrModal } from './OcrModal';
 import { 
   AttachmentFile, formatFileSize, detectMimeType, 
@@ -31,6 +32,7 @@ export const AttachmentBottomSheet: React.FC<AttachmentBottomSheetProps> = ({
   currentAttachments
 }) => {
   const { isDarkMode } = useTheme();
+  const { setMicPermissionError } = useSettings();
   
   // Tab/Screen state within bottom sheet
   const [activeTab, setActiveTab] = useState<'upload' | 'camera' | 'screen' | 'voice' | 'url' | 'plugins' | 'settings'>('upload');
@@ -355,7 +357,9 @@ export const AttachmentBottomSheet: React.FC<AttachmentBottomSheetProps> = ({
       setIsRecording(true);
       triggerHaptic();
     } catch (err) {
-      console.error('Mic access failed:', err);
+      console.warn('Mic access failed or blocked:', err);
+      setMicPermissionError(true);
+      setIsRecording(false);
     }
   };
 

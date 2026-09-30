@@ -8,6 +8,7 @@ import { OfflineMapView } from '../components/OfflineMapView';
 import { MapPin, Search, Plus, Trash2, MessageSquare, Mic, X, Map as MapIcon, Columns, Maximize2, WifiOff, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../contexts/ThemeContext';
+import { usePeriodicAutoSave } from '../hooks/usePeriodicAutoSave';
 
 interface Conversation {
   id: string;
@@ -182,17 +183,14 @@ export const SearchMapsMode: React.FC<SearchMapsModeProps> = ({ voiceSearchTrigg
     }
   }, [conversations, currentConversationId]);
 
-  useEffect(() => {
-    localStorage.setItem('omnichat_searchmaps_conversations', JSON.stringify(conversations));
-  }, [conversations]);
+  // Periodic and unload auto-save for Search & Maps conversations
+  usePeriodicAutoSave('omnichat_searchmaps_conversations', conversations, {
+    intervalMs: 1500
+  });
 
-  useEffect(() => {
-    if (currentConversationId) {
-      localStorage.setItem('omnichat_searchmaps_current_conv', currentConversationId);
-    } else {
-      localStorage.removeItem('omnichat_searchmaps_current_conv');
-    }
-  }, [currentConversationId]);
+  usePeriodicAutoSave('omnichat_searchmaps_current_conv', currentConversationId, {
+    intervalMs: 1500
+  });
 
   // Ensure there is at least one conversation
   useEffect(() => {

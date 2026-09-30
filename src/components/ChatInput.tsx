@@ -189,8 +189,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       mediaRecorder.start();
       setIsRecording(true);
     } catch (error) {
-      console.error('Error accessing microphone:', error);
+      console.warn('Microphone permission blocked or not available:', error);
       setMicPermissionError(true);
+      setIsRecording(false);
+      setIsTranscribing(false);
     }
   };
 
